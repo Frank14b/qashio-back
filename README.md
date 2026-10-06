@@ -2,6 +2,8 @@
 
 NestJS backend for the Qashio expense tracker. Exposes REST APIs for transactions, categories, and budgets, with Postgres as the source of truth and Redis for caching / queues.
 
+**Domain design:** see [`docs/`](./docs/) — [database schema & auth flows](./docs/database-and-auth.md).
+
 ---
 
 ## Tech stack
@@ -62,14 +64,22 @@ Copy and adjust as needed (do not commit real secrets):
 cp .env.example .env
 ```
 
-Example variables:
+Example variables (see `.env.example` for the full list):
 
 ```env
 PORT=3000
 DATABASE_URL=postgresql://postgres:password@localhost:5432/qashio_points
 REDIS_HOST=localhost
 REDIS_PORT=6379
+EMAIL_OTP_MODE=fixed
+EMAIL_OTP_TTL_SECONDS=600
+SMTP_HOST=localhost
+SMTP_PORT=1025
+SMTP_FROM=noreply@qashio.local
 ```
+
+- `EMAIL_OTP_MODE=fixed` → OTP is always `123456` (local/dev)
+- `EMAIL_OTP_MODE=live` → random 6-digit OTP emailed via Nodemailer
 
 ### Local
 
@@ -146,16 +156,17 @@ Pre-commit (Husky + lint-staged) runs ESLint and Prettier on staged files when h
 - [x] NestJS scaffold + TypeScript
 - [x] Dev Dockerfile + Compose wiring (Postgres, Redis)
 - [x] ESLint, Prettier, Husky, lint-staged
-- [x] Shared module placeholder (`src/shared`)
+- [x] Shared module + TypeORM database bootstrap
+- [x] Hexagonal `users`, `auth` (sessions), `activity-logs` modules
+- [x] Auth HTTP: register / verify-email / login / refresh / logout + Swagger at `/docs`
+- [x] Redis adapter + Nodemailer email port for OTP flows
+- [x] Signup email verification OTP; forgot-password + change-password with OTP
 
 ### Next — core modules
 
-- [ ] Postgres + TypeORM (or Prisma) connection
 - [ ] `CategoriesModule` (entity, DTO, CRUD list/create)
 - [ ] `TransactionsModule` (entity linked to category, full CRUD)
-- [ ] Input validation via DTOs + global ValidationPipe
-- [ ] Centralized exception filter
-- [ ] Swagger setup (`/docs`)
+- [ ] `AccountsModule` (wallets)
 
 ### Next — event-driven budget check
 
@@ -168,8 +179,7 @@ Pre-commit (Husky + lint-staged) runs ESLint and Prettier on staged files when h
 
 - [ ] Filtering, sorting, pagination on `GET /transactions`
 - [ ] Summary/report endpoint (income vs expense by date range)
-- [ ] JWT auth (optional per assignment)
-- [ ] Unit tests for services / controllers
+- [ ] JWT route guards for protected resources
 - [ ] Production Dockerfile (`build` + `start:prod`)
 
 ### Out of scope for v1 (by design)

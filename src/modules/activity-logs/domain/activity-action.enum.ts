@@ -1,0 +1,12 @@
+export enum ActivityAction {
+  AUTH_REGISTER = 'auth.register',
+  AUTH_LOGIN = 'auth.login',
+  AUTH_REFRESH = 'auth.refresh',
+  AUTH_LOGOUT = 'auth.logout',
+  AUTH_OTP_SENT = 'auth.otp_sent',
+  AUTH_VERIFY_EMAIL = 'auth.verify_email',
+  AUTH_FORGOT_PASSWORD = 'auth.forgot_password',
+  AUTH_RESET_PASSWORD = 'auth.reset_password',
+  AUTH_CHANGE_PASSWORD_REQUEST = 'auth.change_password_request',
+  AUTH_CHANGE_PASSWORD = 'auth.change_password',
+}
