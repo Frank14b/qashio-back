@@ -73,6 +73,8 @@ REDIS_HOST=localhost
 REDIS_PORT=6379
 EMAIL_OTP_MODE=fixed
 EMAIL_OTP_TTL_SECONDS=600
+TYPEORM_SYNC=true
+# SEED_CURRENCIES=true   # optional; auto-seeds when TYPEORM_SYNC=true if unset
 SMTP_HOST=localhost
 SMTP_PORT=1025
 SMTP_FROM=noreply@qashio.local
@@ -80,16 +82,19 @@ SMTP_FROM=noreply@qashio.local
 
 - `EMAIL_OTP_MODE=fixed` → OTP is always `123456` (local/dev)
 - `EMAIL_OTP_MODE=live` → random 6-digit OTP emailed via Nodemailer
+- **Currency seed:** on boot, currencies are upserted by ISO `code` when `SEED_CURRENCIES=true`, or when `TYPEORM_SYNC=true` and `SEED_CURRENCIES` is unset. Force with `npm run seed`. Set `SEED_CURRENCIES=false` to skip auto-seed.
 
 ### Local
 
 ```bash
 cd qashio-api
 npm install
+npm run seed          # optional explicit currency upsert
 npm run start:dev
 ```
 
-API: [http://localhost:3000](http://localhost:3000)
+API: [http://localhost:3000](http://localhost:3000)  
+Swagger: [http://localhost:3000/docs](http://localhost:3000/docs) (disabled when `NODE_ENV=production`)
 
 ### Docker (from repo root)
 
@@ -97,7 +102,7 @@ API: [http://localhost:3000](http://localhost:3000)
 docker compose up -d --build qashio-api postgres redis
 ```
 
-API is mapped to [http://localhost:3000](http://localhost:3000).
+API is mapped to [http://localhost:3000](http://localhost:3000). Swagger: [http://localhost:3000/docs](http://localhost:3000/docs) when not in production.
 
 ---
 
@@ -115,37 +120,43 @@ API is mapped to [http://localhost:3000](http://localhost:3000).
 | `npm test` | Unit tests |
 | `npm run test:e2e` | E2E tests |
 | `npm run test:cov` | Coverage |
+| `npm run seed` | Idempotent currency upsert (ISO codes) |
 
 Pre-commit (Husky + lint-staged) runs ESLint and Prettier on staged files when hooks are installed via `npm install` / `npm run prepare`.
 
 ---
 
-## Planned API surface (minimum)
+## API surface
 
-### Transactions
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/transactions` | Create |
-| `GET` | `/transactions` | List (filter / sort / paginate later) |
-| `GET` | `/transactions/:id` | Get one |
-| `PUT` | `/transactions/:id` | Update |
-| `DELETE` | `/transactions/:id` | Delete |
-
-### Categories
+### Auth (existing)
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/categories` | Create |
-| `GET` | `/categories` | List |
+| `POST` | `/auth/register` | Register (inactive until OTP) |
+| `POST` | `/auth/verify-email` | Activate user + session; emits `user.activated` |
+| `POST` | `/auth/login` | Login (verified users) |
+| `POST` | `/auth/refresh` / `/auth/logout` | Session rotation / revoke |
 
-### Budgets (starter goal)
+### Currencies / accounts / categories
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/budgets` | Set budget per category / period |
-| `GET` | `/budgets` | List |
-| `GET` | `/budgets/:categoryId/usage` | Spending vs budget |
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/currencies` | No | List seeded currencies |
+| `POST` | `/accounts` | Bearer | Create wallet |
+| `GET` | `/accounts` | Bearer | List wallets (`?includeArchived=`) |
+| `GET` | `/accounts/:id` | Bearer | Get one |
+| `PATCH` | `/accounts/:id` | Bearer | Rename / set default / archive |
+| `POST` | `/categories` | Bearer | Create category |
+| `GET` | `/categories` | Bearer | List categories |
+
+**Default categories:** after `POST /auth/verify-email`, Nest `EventEmitter` emits `user.activated`; `UserActivatedListener` creates a sensible default set (Food, Transport, Salary, …) idempotently by name.
+
+### Still planned
+
+| Area | Notes |
+|------|-------|
+| Transactions | Full CRUD scoped by account / user |
+| Budgets | Per category / period + usage |
 
 ---
 
@@ -161,25 +172,25 @@ Pre-commit (Husky + lint-staged) runs ESLint and Prettier on staged files when h
 - [x] Auth HTTP: register / verify-email / login / refresh / logout + Swagger at `/docs`
 - [x] Redis adapter + Nodemailer email port for OTP flows
 - [x] Signup email verification OTP; forgot-password + change-password with OTP
+- [x] `CurrenciesModule` + idempotent seed (`SEED_CURRENCIES` / `TYPEORM_SYNC` / `npm run seed`)
+- [x] `AccountsModule` (wallets CRUD-ish + JwtAuthGuard)
+- [x] `CategoriesModule` (create/list + defaults on `user.activated` via EventEmitter)
 
 ### Next — core modules
 
-- [ ] `CategoriesModule` (entity, DTO, CRUD list/create)
 - [ ] `TransactionsModule` (entity linked to category, full CRUD)
-- [ ] `AccountsModule` (wallets)
 
 ### Next — event-driven budget check
 
 - [ ] Emit domain event on transaction create/update (Nest `EventEmitter`)
 - [ ] Listener: log activity + recompute / check budget usage
 - [ ] Redis cache for hot reads (categories, budget summary)
-- [ ] Optional Bull queue for heavier async work
+- [ ] Optional Bull queue for heavier async work (email batches, multi-instance reliability)
 
 ### Later / bonus
 
 - [ ] Filtering, sorting, pagination on `GET /transactions`
 - [ ] Summary/report endpoint (income vs expense by date range)
-- [ ] JWT route guards for protected resources
 - [ ] Production Dockerfile (`build` + `start:prod`)
 
 ### Out of scope for v1 (by design)

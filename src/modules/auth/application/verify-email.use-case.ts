@@ -2,12 +2,21 @@ import {
   BadRequestException,
   Inject,
   Injectable,
+  Optional,
   UnauthorizedException,
 } from '@nestjs/common';
 import {
   USER_REPOSITORY,
   UserRepositoryPort,
 } from '@/modules/users/domain/ports/user.repository.port';
+import {
+  DOMAIN_EVENT_PUBLISHER,
+  DomainEventPublisherPort,
+} from '@/shared/events/domain-event-publisher.port';
+import {
+  USER_ACTIVATED_EVENT,
+  UserActivatedPayload,
+} from '../domain/events/user-activated.event';
 import { OtpPurpose } from '../domain/otp-purpose';
 import {
   AUTH_SESSION_REPOSITORY,
@@ -29,6 +38,9 @@ export class VerifyEmailUseCase {
     @Inject(AUTH_SESSION_REPOSITORY) private readonly sessions: AuthSessionRepositoryPort,
     @Inject(TOKEN_SERVICE) private readonly tokens: TokenServicePort,
     @Inject(OTP_SERVICE) private readonly otp: OtpPort,
+    @Optional()
+    @Inject(DOMAIN_EVENT_PUBLISHER)
+    private readonly events?: DomainEventPublisherPort,
   ) {}
 
   async execute(command: VerifyEmailCommand): Promise<AuthTokensResult> {
@@ -48,6 +60,9 @@ export class VerifyEmailUseCase {
     }
 
     const activated = await this.users.activate(user.id);
+
+    const payload: UserActivatedPayload = { userId: activated.id };
+    this.events?.emit(USER_ACTIVATED_EVENT, payload);
 
     const refreshToken = this.tokens.generateRefreshToken();
     const session = await this.sessions.create({

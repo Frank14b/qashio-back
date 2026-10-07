@@ -9,4 +9,7 @@ export enum ActivityAction {
   AUTH_RESET_PASSWORD = 'auth.reset_password',
   AUTH_CHANGE_PASSWORD_REQUEST = 'auth.change_password_request',
   AUTH_CHANGE_PASSWORD = 'auth.change_password',
+  ACCOUNT_CREATE = 'account.create',
+  ACCOUNT_UPDATE = 'account.update',
+  CATEGORY_CREATE = 'category.create',
 }

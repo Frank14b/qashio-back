@@ -21,6 +21,7 @@ import { JwtTokenService } from './infrastructure/crypto/jwt-token.service';
 import { RedisOtpService } from './infrastructure/otp/redis-otp.service';
 import { AuthSessionOrmEntity } from './infrastructure/persistence/auth-session.orm-entity';
 import { TypeOrmAuthSessionRepository } from './infrastructure/persistence/typeorm-auth-session.repository';
+import { JwtAuthGuard } from './presentation/guards/jwt-auth.guard';
 import { AuthController } from './presentation/http/auth.controller';
 
 @Module({
@@ -49,6 +50,7 @@ import { AuthController } from './presentation/http/auth.controller';
     ConfirmPasswordResetUseCase,
     RequestChangePasswordUseCase,
     ConfirmChangePasswordUseCase,
+    JwtAuthGuard,
     {
       provide: AUTH_SESSION_REPOSITORY,
       useClass: TypeOrmAuthSessionRepository,
@@ -66,5 +68,6 @@ import { AuthController } from './presentation/http/auth.controller';
       useClass: RedisOtpService,
     },
   ],
+  exports: [JwtModule, JwtAuthGuard],
 })
 export class AuthModule {}

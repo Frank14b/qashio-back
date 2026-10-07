@@ -414,8 +414,10 @@ Recommended first build order:
 
 ---
 
-## Open choices (confirm when implementing)
+## Implemented decisions (accounts / currencies / categories)
 
-1. **Default wallet on register** — auto-create “Main” in a default currency vs force explicit create.  
-2. **Currency change** — forbidden after create (recommended) vs allow only if zero transactions.  
-3. **Refresh rotation** — always rotate on refresh (recommended) vs reuse until expiry.
+1. **Default wallet** — not auto-created on register/verify; client calls `POST /accounts`. First wallet for a user becomes `is_default` automatically if `isDefault` is omitted.
+2. **Currency change** — forbidden after create (column fixed; no PATCH for `currencyCode`).
+3. **Refresh rotation** — always rotate on refresh (auth module).
+4. **Currency seed** — idempotent upsert by `code` on boot when `SEED_CURRENCIES=true` or `TYPEORM_SYNC=true` (unless `SEED_CURRENCIES=false`); also `npm run seed`.
+5. **Default categories** — Nest `EventEmitter` event `user.activated` from verify-email; `UserActivatedListener` inserts defaults idempotently (skip names the user already has). Prefer EventEmitter over Bull for this small in-process write; use Bull later for heavy/retryable/multi-instance jobs.

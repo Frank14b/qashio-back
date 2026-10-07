@@ -3,7 +3,6 @@ import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
 import { REDIS_CLIENT } from './redis.constants';
 
-@Global()
 @Module({
   providers: [
     {
