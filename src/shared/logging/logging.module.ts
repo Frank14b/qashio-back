@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import * as Sentry from '@sentry/nestjs';
 import { LoggerModule } from 'nestjs-pino';
 
 export const REQUEST_ID_HEADER = 'x-request-id';
@@ -30,6 +31,8 @@ const SAFE_REQUEST_ID = /^[A-Za-z0-9._:-]{8,128}$/;
                 ? incoming
                 : randomUUID();
             res.setHeader('X-Request-Id', id);
+            // Tag this request's Sentry events so they link to its logs (no-op when disabled).
+            Sentry.getIsolationScope().setTag('request_id', id);
             return id;
           },
           redact: ['req.headers.authorization', 'req.headers.cookie', 'res.headers["set-cookie"]'],

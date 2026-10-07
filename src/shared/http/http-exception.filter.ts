@@ -29,11 +29,13 @@ export class HttpExceptionFilter implements ExceptionFilter {
 
     const { statusCode, error, message } = this.normalize(exception);
 
-    if (statusCode >= HttpStatus.INTERNAL_SERVER_ERROR) {
-      this.logger.error(
-        `${request.method} ${request.url}`,
-        exception instanceof Error ? exception.stack : String(exception),
-      );
+    if (!(exception instanceof HttpException)) {
+      // Unexpected: log the exception itself (pino `err`) so Sentry's pino integration
+      // reports it once, with its real stack and this request's context.
+      this.logger.error(exception instanceof Error ? exception : String(exception));
+    } else if (statusCode >= HttpStatus.INTERNAL_SERVER_ERROR) {
+      // Deliberate 5xx (e.g. health 503): worth a log line, not an error report.
+      this.logger.warn(`${request.method} ${request.url} -> ${statusCode}`);
     }
 
     const body: ErrorResponseBody = {

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { parseEnv } from '../config/env';
 import { buildTypeOrmOptions } from './typeorm.config';
 
 @Module({
@@ -8,6 +9,8 @@ import { buildTypeOrmOptions } from './typeorm.config';
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: ['.env'],
+      // Same zod schema as instrument.ts; ConfigService then returns typed values.
+      validate: parseEnv,
     }),
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],

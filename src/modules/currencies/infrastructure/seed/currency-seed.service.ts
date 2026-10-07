@@ -24,6 +24,7 @@ export class CurrencySeedService implements OnModuleInit {
   }
 
   private shouldSeed(): boolean {
-    return this.config.get<string>('SEED_CURRENCIES', 'true') !== 'false';
+    // Parsed to a boolean by the env schema (default true).
+    return this.config.get<boolean>('SEED_CURRENCIES', true);
   }
 }

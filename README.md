@@ -147,6 +147,9 @@ Pre-commit (Husky + lint-staged) runs ESLint and Prettier on staged files when h
 
 ### Observability & abuse protection
 
+- **Environment validation:** `src/shared/config/env.ts` (zod) validates every variable at startup (`instrument.ts`, before anything loads) and backs `ConfigModule`, so `ConfigService` returns typed values. Invalid config stops the process with a list of every problem. Production guardrails: `EMAIL_OTP_MODE=live`, a unique 32+ char `JWT_ACCESS_SECRET`; `SENTRY_ENABLED=true` requires `SENTRY_DSN`. The migration CLI only checks `DATABASE_URL`.
+- **Sentry** (`@sentry/nestjs`, off by default — `SENTRY_ENABLED` + `SENTRY_DSN`): unexpected errors and error-level logs (e.g. failing event listeners) are reported once, tagged `request_id`; expected HTTP errors (4xx, deliberate 5xx such as the health 503) are not. Request/response bodies, cookies and auth headers are never sent.
+
 - **Request id:** every response carries `X-Request-Id` (the caller's value if valid, else a UUID). Logs are structured JSON via `nestjs-pino` (pretty in dev); every line written while handling the request — including async event listeners (budgets, notifications) — has the same `req.id`. Error bodies include `requestId`; activity logs store it in `metadata.requestId`. The web app sends its own id per action (reused on the retry after a token refresh).
 - **Rate limits** (`@nestjs/throttler`, Redis storage, per IP): global `RATE_LIMIT_PER_MINUTE` (120); login, register, verify-email, forgot/reset password and change-password 5/min; refresh 30/min; `/health` exempt. Exceeding returns 429. Set `TRUST_PROXY` behind a load balancer.
 - **OTP brute force:** each code is discarded after 5 wrong attempts (per email, across IPs).

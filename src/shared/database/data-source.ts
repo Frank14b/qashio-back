@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { DataSource } from 'typeorm';
+import { baseEnvSchema, parseEnv } from '../config/env';
 import { buildTypeOrmOptions } from './typeorm.config';
 
 // TypeORM CLI entry point (`npm run migration:*`). Outside Nest, so load `.env`
@@ -10,9 +11,7 @@ if (existsSync(envFile)) {
   process.loadEnvFile(envFile);
 }
 
-const url = process.env.DATABASE_URL;
-if (!url) {
-  throw new Error('DATABASE_URL is required to run migrations');
-}
+// Migrations only need the database, not the app's secrets (JWT, SMTP…).
+const { DATABASE_URL } = parseEnv(process.env, baseEnvSchema.pick({ DATABASE_URL: true }));
 
-export default new DataSource(buildTypeOrmOptions(url));
+export default new DataSource(buildTypeOrmOptions(DATABASE_URL));
