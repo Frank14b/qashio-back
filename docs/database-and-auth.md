@@ -102,6 +102,7 @@ erDiagram
     uuid user_id FK
     string name
     char currency_code FK
+    decimal opening_balance
     boolean is_default
     timestamptz archived_at
     timestamptz created_at
@@ -122,8 +123,11 @@ erDiagram
     uuid account_id FK
     uuid category_id FK
     uuid user_id FK
+    string reference UK
     decimal amount
     string type
+    string status
+    string counterparty
     timestamptz occurred_at
     string narration
     timestamptz created_at
@@ -202,17 +206,20 @@ Wallets **do not** convert FX in v1 — each account is single-currency.
 | `user_id` | `uuid` FK → `users` | |
 | `name` | `varchar` | e.g. “Cash”, “Revolut EUR” |
 | `currency_code` | `char(3)` FK → `currencies` | Fixed for the life of the account (v1) |
+| `opening_balance` | `numeric(19, 4)` default `0` | Balance before the first transaction; may be negative; editable via `PATCH /accounts/:id` |
 | `is_default` | `boolean` | At most one default per user (partial unique index) |
 | `archived_at` | `timestamptz` nullable | Soft archive; hide from pickers |
 | `created_at` / `updated_at` | `timestamptz` | |
 
-**Balance:** do **not** store a mutable `balance` column in v1. Derive:
+Unique `(id, user_id)` — target of the composite FK from `transactions`.
+
+**Balance:** no stored `balance` column. It is derived per request (`GET /accounts`, `GET /accounts/:id`):
 
 ```text
-balance = sum(income amounts) - sum(expense amounts)
+balance = opening_balance + Σ completed income − Σ completed expense
 ```
 
-for that `account_id`. Add a cached balance later if needed (updated via domain events).
+If it ever needs caching, update the cache in the **same DB transaction** as the transaction write — not in an async event listener (a failed or duplicated listener would make it drift).
 
 ### `categories`
 
@@ -226,28 +233,37 @@ User-scoped (assignment: create + list).
 | `kind` | `varchar` / enum | `income` \| `expense` \| `both` |
 | `created_at` / `updated_at` | `timestamptz` | |
 
+Unique `(user_id, name)` and `(id, user_id)` (target of the composite FK from `transactions`).
+
 ### `transactions`
 
 | Column | Type | Notes |
 |--------|------|--------|
 | `id` | `uuid` PK | |
-| `account_id` | `uuid` FK → `accounts` | Wallet; implies currency |
-| `category_id` | `uuid` FK → `categories` | Required |
-| `user_id` | `uuid` FK → `users` | Denormalized for authz queries (must match account owner) |
-| `amount` | `numeric(19, 4)` | Always **> 0**; sign via `type` |
-| `type` | `varchar` / enum | `income` \| `expense` |
-| `occurred_at` | `timestamptz` | Business date/time of the entry |
+| `reference` | `varchar(32)` UK | Human-readable, e.g. `TXN-261007-7K3Q9D`; generated server-side, retried on collision |
+| `user_id` | `uuid` | Denormalized owner (authz / filters) |
+| `account_id` | `uuid` | Wallet; implies currency |
+| `category_id` | `uuid` | Required |
+| `type` | `varchar(10)` | `income` (money **in**, +) \| `expense` (money **out**, −) |
+| `amount` | `numeric(19, 4)` | Always **> 0**; the sign comes from `type`; decimals ≤ currency `decimal_places` |
+| `status` | `varchar(12)` default `completed` | `pending` \| `completed` \| `failed`. DB-only for now: the API creates `completed` and does not accept changes. Only `completed` rows count toward balances / summaries |
+| `counterparty` | `varchar(160)` nullable | Who was paid / who paid |
 | `narration` | `text` nullable | |
+| `occurred_at` | `timestamptz` | Business date/time of the entry |
 | `created_at` / `updated_at` | `timestamptz` | |
 
-Constraints:
+Constraints (DB):
 
-- `amount > 0`
-- `type in ('income', 'expense')`
-- Category `kind` must be compatible with transaction `type` (enforce in application layer)
-- Account must belong to `user_id`
+- `CHK_transactions_amount_positive`: `amount > 0`
+- `CHK_transactions_type`, `CHK_transactions_status`: allowed values
+- `UQ_transactions_reference`
+- `FK_transactions_account_user`: `(account_id, user_id) → accounts(id, user_id)` — a transaction can only point at its owner's wallet
+- `FK_transactions_category_user`: `(category_id, user_id) → categories(id, user_id)`
+- Both FKs `ON DELETE RESTRICT` (archive wallets instead of deleting them)
 
-Indexes: `(account_id, occurred_at DESC)`, `(user_id, occurred_at DESC)`, `(category_id)`.
+Application rules: category `kind` compatible with `type` (`both` fits either); no new entries on archived wallets; moving an entry to a wallet in another currency is rejected.
+
+Indexes: `(user_id, occurred_at)`, `(account_id, occurred_at)`, `(user_id, category_id, occurred_at)` (budget queries).
 
 ---
 
@@ -414,10 +430,13 @@ Recommended first build order:
 
 ---
 
-## Implemented decisions (accounts / currencies / categories)
+## Implemented decisions (accounts / currencies / categories / transactions)
 
 1. **Default wallets** — on verify-email, Nest `EventEmitter` event `user.activated` triggers accounts `UserActivatedListener` → `CreateDefaultAccountsUseCase` inserts starter wallets idempotently by name (`Cash` default USD, `Bank`, `Credit Card`). Users can rename / change default / archive later via `PATCH /accounts/:id`. Manual `POST /accounts` still works; first manually created wallet becomes `is_default` if none is set and `isDefault` is omitted.
 2. **Currency change** — forbidden after create (column fixed; no PATCH for `currencyCode`).
 3. **Refresh rotation** — always rotate on refresh (auth module).
-4. **Currency seed** — idempotent upsert by `code` on boot when `SEED_CURRENCIES=true` or `TYPEORM_SYNC=true` (unless `SEED_CURRENCIES=false`); also `npm run seed`.
+4. **Currency seed** — idempotent upsert by `code` on boot (default on; `SEED_CURRENCIES=false` to skip); also `npm run seed`.
 5. **Default categories** — same `user.activated` event; categories `UserActivatedListener` inserts defaults idempotently (skip names the user already has). Prefer EventEmitter over Bull for this small in-process write; use Bull later for heavy/retryable/multi-instance jobs.
+6. **Migrations** — `synchronize` is off; schema changes ship as TypeORM migrations in `src/shared/database/migrations` (baseline `InitialSchema` is idempotent for DBs created by the old sync). Docker entrypoint runs `npm run migration:run` before the app starts (`RUN_MIGRATIONS=false` to skip).
+7. **Money** — `numeric(19, 4)` in Postgres, decimal strings in TypeScript (`decimal.js` for math, class-validator `IsDecimal` on input); responses are formatted to the currency's `decimal_places`.
+8. **Transaction events** — `transaction.created`, `transaction.updated` (`previous` + `current`), `transaction.deleted`; payloads are plain snapshots for budget/activity listeners.

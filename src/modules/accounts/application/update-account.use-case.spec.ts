@@ -6,11 +6,14 @@ describe('UpdateAccountUseCase', () => {
     clearDefaultForUser: jest.fn(),
     update: jest.fn(),
   };
+  const currencies = {
+    findByCode: jest.fn(),
+  };
   let useCase: UpdateAccountUseCase;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    useCase = new UpdateAccountUseCase(accounts as never);
+    useCase = new UpdateAccountUseCase(accounts as never, currencies as never);
   });
 
   it('archives an account and clears default via repository', async () => {

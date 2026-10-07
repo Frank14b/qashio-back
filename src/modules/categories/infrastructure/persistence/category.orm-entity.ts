@@ -3,12 +3,15 @@ import {
   CreateDateColumn,
   Entity,
   Index,
+  Unique,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
 
 @Entity({ name: 'categories' })
 @Index('UQ_categories_user_name', ['userId', 'name'], { unique: true })
+// Target of the composite FK transactions(category_id, user_id).
+@Unique('UQ_categories_id_user', ['id', 'userId'])
 export class CategoryOrmEntity {
   @PrimaryGeneratedColumn('uuid')
   id!: string;

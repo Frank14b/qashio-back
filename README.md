@@ -73,8 +73,8 @@ REDIS_HOST=localhost
 REDIS_PORT=6379
 EMAIL_OTP_MODE=fixed
 EMAIL_OTP_TTL_SECONDS=600
-TYPEORM_SYNC=true
-# SEED_CURRENCIES=true   # optional; auto-seeds when TYPEORM_SYNC=true if unset
+RUN_MIGRATIONS=true      # Docker entrypoint applies pending migrations on start
+# SEED_CURRENCIES=false  # optional; currencies are upserted on boot by default
 SMTP_HOST=localhost
 SMTP_PORT=1025
 SMTP_FROM=noreply@qashio.local
@@ -82,13 +82,15 @@ SMTP_FROM=noreply@qashio.local
 
 - `EMAIL_OTP_MODE=fixed` → OTP is always `123456` (local/dev)
 - `EMAIL_OTP_MODE=live` → random 6-digit OTP emailed via Nodemailer
-- **Currency seed:** on boot, currencies are upserted by ISO `code` when `SEED_CURRENCIES=true`, or when `TYPEORM_SYNC=true` and `SEED_CURRENCIES` is unset. Force with `npm run seed`. Set `SEED_CURRENCIES=false` to skip auto-seed.
+- **Schema:** managed by TypeORM migrations only — `synchronize` is always off. See [Migrations](#migrations).
+- **Currency seed:** on boot, currencies are upserted by ISO `code` (idempotent). Set `SEED_CURRENCIES=false` to skip; force with `npm run seed`.
 
 ### Local
 
 ```bash
 cd qashio-api
 npm install
+npm run migration:run # apply pending migrations
 npm run seed          # optional explicit currency upsert
 npm run start:dev
 ```
@@ -101,6 +103,8 @@ Swagger: [http://localhost:3000/docs](http://localhost:3000/docs) (disabled when
 ```bash
 docker compose up -d --build qashio-api postgres redis
 ```
+
+The API entrypoint runs `npm run migration:run` before starting (Postgres has a healthcheck, so it waits for the DB). Set `RUN_MIGRATIONS=false` to skip.
 
 API is mapped to [http://localhost:3000](http://localhost:3000). Swagger: [http://localhost:3000/docs](http://localhost:3000/docs) when not in production.
 
@@ -121,12 +125,36 @@ API is mapped to [http://localhost:3000](http://localhost:3000). Swagger: [http:
 | `npm run test:e2e` | E2E tests |
 | `npm run test:cov` | Coverage |
 | `npm run seed` | Idempotent currency upsert (ISO codes) |
+| `npm run migration:run` | Apply pending migrations |
+| `npm run migration:revert` | Revert the last migration |
+| `npm run migration:show` | List migrations and whether they ran |
+| `npm run migration:generate -- src/shared/database/migrations/<Name>` | Generate a migration from entity changes |
+| `npm run migration:create -- src/shared/database/migrations/<Name>` | Empty migration |
+| `npm run migration:check` | Fails if entities and migrations are out of sync |
+| `npm run migration:run:prod` | Apply migrations from compiled `dist` |
+
+### Migrations
+
+- Files live in `src/shared/database/migrations`; the CLI data source is `src/shared/database/data-source.ts` (shares options with `DatabaseModule` via `typeorm.config.ts`).
+- `InitialSchema` is the baseline of the schema previously created by `synchronize`. It is idempotent (`IF NOT EXISTS`, same constraint names), so existing dev databases just record it as applied.
+- After changing an `*.orm-entity.ts`, run `migration:generate`, review the SQL, commit it, and keep `migration:check` green.
 
 Pre-commit (Husky + lint-staged) runs ESLint and Prettier on staged files when hooks are installed via `npm install` / `npm run prepare`.
 
 ---
 
 ## API surface
+
+### Health (public)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/health/live` | Liveness — process is up (no dependency checks); use for restarts |
+| `GET` | `/health` | Readiness — app, database, Redis, heap and RSS memory. **503** if any is down; body names the failing check |
+
+Memory limits: `HEALTH_MEMORY_HEAP_MB` (default 512), `HEALTH_MEMORY_RSS_MB` (default 1024). `APP_VERSION` is echoed in the `app` check.
+
+**Pipeline usage:** Compose has a healthcheck on `/health`, so `docker compose up -d --wait qashio-api` blocks until the API is ready and exits non-zero if it never becomes healthy. Against a deployed URL: `curl -fsS https://<host>/health` (non-zero exit on 503).
 
 ### Auth (existing)
 
@@ -137,7 +165,7 @@ Pre-commit (Husky + lint-staged) runs ESLint and Prettier on staged files when h
 | `POST` | `/auth/login` | Login (verified users) |
 | `POST` | `/auth/refresh` / `/auth/logout` | Session rotation / revoke |
 
-### Currencies / accounts / categories
+### Currencies / accounts / categories / transactions
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
@@ -145,9 +173,19 @@ Pre-commit (Husky + lint-staged) runs ESLint and Prettier on staged files when h
 | `POST` | `/accounts` | Bearer | Create wallet |
 | `GET` | `/accounts` | Bearer | List wallets (`?includeArchived=`) |
 | `GET` | `/accounts/:id` | Bearer | Get one |
-| `PATCH` | `/accounts/:id` | Bearer | Rename / set default / archive |
+| `PATCH` | `/accounts/:id` | Bearer | Rename / opening balance / set default / archive |
 | `POST` | `/categories` | Bearer | Create category |
 | `GET` | `/categories` | Bearer | List categories |
+| `POST` | `/transactions` | Bearer | Record income / expense (`accountId` optional → default wallet) |
+| `GET` | `/transactions` | Bearer | List — `page`, `limit` (≤100), `sortBy`, `sortOrder`, `accountId`, `categoryId`, `type`, `status`, `from`, `to`, `search` |
+| `GET` | `/transactions/summary` | Bearer | Completed income / expense / net per currency (`accountId`, `from`, `to`) |
+| `GET` | `/transactions/:id` | Bearer | Get one |
+| `PUT` | `/transactions/:id` | Bearer | Update (only fields sent change) |
+| `DELETE` | `/transactions/:id` | Bearer | Delete (204) |
+
+**Money in / out:** `amount` is always positive; `type` gives the direction — `income` adds to the wallet, `expense` subtracts. Responses include `direction` (`in`/`out`) and `signedAmount`. Wallet `balance` = `openingBalance` + completed income − completed expense (derived, never stored). Amounts are decimal strings formatted to the currency's decimal places.
+
+**Events:** `transaction.created`, `transaction.updated` (previous + current snapshot), `transaction.deleted` via `EventEmitter` — ready for budget listeners.
 
 **Default categories:** after `POST /auth/verify-email`, Nest `EventEmitter` emits `user.activated`; `UserActivatedListener` creates a sensible default set (Food, Transport, Salary, …) idempotently by name.
 
@@ -155,7 +193,6 @@ Pre-commit (Husky + lint-staged) runs ESLint and Prettier on staged files when h
 
 | Area | Notes |
 |------|-------|
-| Transactions | Full CRUD scoped by account / user |
 | Budgets | Per category / period + usage |
 
 ---
@@ -172,25 +209,28 @@ Pre-commit (Husky + lint-staged) runs ESLint and Prettier on staged files when h
 - [x] Auth HTTP: register / verify-email / login / refresh / logout + Swagger at `/docs`
 - [x] Redis adapter + Nodemailer email port for OTP flows
 - [x] Signup email verification OTP; forgot-password + change-password with OTP
-- [x] `CurrenciesModule` + idempotent seed (`SEED_CURRENCIES` / `TYPEORM_SYNC` / `npm run seed`)
+- [x] `CurrenciesModule` + idempotent seed (`SEED_CURRENCIES` / `npm run seed`)
 - [x] `AccountsModule` (wallets CRUD-ish + JwtAuthGuard)
 - [x] `CategoriesModule` (create/list + defaults on `user.activated` via EventEmitter)
+- [x] TypeORM migrations (synchronize off; Docker entrypoint runs them)
+- [x] Wallet opening balance + derived balance
+- [x] `TransactionsModule` (CRUD, unique reference, counterparty, status, filters/sort/pagination, summary, domain events)
 
 ### Next — core modules
 
-- [ ] `TransactionsModule` (entity linked to category, full CRUD)
+- [ ] `BudgetsModule` (per category / period + usage)
 
 ### Next — event-driven budget check
 
-- [ ] Emit domain event on transaction create/update (Nest `EventEmitter`)
+- [x] Emit domain event on transaction create/update/delete (Nest `EventEmitter`)
 - [ ] Listener: log activity + recompute / check budget usage
 - [ ] Redis cache for hot reads (categories, budget summary)
 - [ ] Optional Bull queue for heavier async work (email batches, multi-instance reliability)
 
 ### Later / bonus
 
-- [ ] Filtering, sorting, pagination on `GET /transactions`
-- [ ] Summary/report endpoint (income vs expense by date range)
+- [x] Filtering, sorting, pagination on `GET /transactions`
+- [x] Summary/report endpoint (income vs expense by date range)
 - [ ] Production Dockerfile (`build` + `start:prod`)
 
 ### Out of scope for v1 (by design)

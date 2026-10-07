@@ -12,4 +12,11 @@ if [ ! -d node_modules ] || [ ! -f "$MARKER" ] || [ "$(cat "$MARKER")" != "$CURR
   echo "$CURRENT" > "$MARKER"
 fi
 
+# Schema changes are applied only through migrations (synchronize is off).
+# Set RUN_MIGRATIONS=false to start the app without touching the schema.
+if [ "${RUN_MIGRATIONS:-true}" = "true" ]; then
+  echo "Running database migrations..."
+  npm run migration:run
+fi
+
 exec "$@"

@@ -4,6 +4,11 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import {
+  CURRENCY_REPOSITORY,
+  CurrencyRepositoryPort,
+} from '@/modules/currencies/domain/ports/currency.repository.port';
+import { parseMoneyInput } from '@/shared/money/money-input';
 import { Account } from '../domain/entities/account.entity';
 import {
   ACCOUNT_REPOSITORY,
@@ -16,12 +21,14 @@ export type UpdateAccountCommand = {
   name?: string;
   isDefault?: boolean;
   archive?: boolean;
+  openingBalance?: string | number;
 };
 
 @Injectable()
 export class UpdateAccountUseCase {
   constructor(
     @Inject(ACCOUNT_REPOSITORY) private readonly accounts: AccountRepositoryPort,
+    @Inject(CURRENCY_REPOSITORY) private readonly currencies: CurrencyRepositoryPort,
   ) {}
 
   async execute(command: UpdateAccountCommand): Promise<Account> {
@@ -33,26 +40,23 @@ export class UpdateAccountUseCase {
       throw new NotFoundException('Account not found');
     }
 
-    if (
-      command.name === undefined &&
-      command.isDefault === undefined &&
-      command.archive === undefined
-    ) {
-      throw new BadRequestException('No updates provided');
-    }
-
-    const name =
-      command.name !== undefined ? command.name.trim() : undefined;
-    if (name !== undefined && !name) {
-      throw new BadRequestException('Account name is required');
-    }
-
-    if (command.archive === true && command.isDefault === true) {
-      throw new BadRequestException('Cannot archive and set as default');
-    }
-
+    // Input shape (at least one field, non-empty name, not archive + isDefault)
+    // is validated by UpdateAccountRequestDto; only state-dependent rules live here.
     if (command.isDefault === true && existing.isArchived && command.archive !== false) {
       throw new BadRequestException('Cannot set an archived account as default');
+    }
+
+    let openingBalance: string | undefined;
+    if (command.openingBalance !== undefined) {
+      const currency = await this.currencies.findByCode(existing.currencyCode);
+      if (!currency) {
+        throw new BadRequestException(`Unknown currency: ${existing.currencyCode}`);
+      }
+      openingBalance = parseMoneyInput(command.openingBalance, {
+        field: 'openingBalance',
+        decimalPlaces: currency.decimalPlaces,
+        currencyCode: currency.code,
+      });
     }
 
     if (command.isDefault === true) {
@@ -67,9 +71,10 @@ export class UpdateAccountUseCase {
     }
 
     return this.accounts.update(command.accountId, {
-      name,
+      name: command.name?.trim(),
       isDefault: command.isDefault,
       archivedAt,
+      openingBalance,
     });
   }
 }

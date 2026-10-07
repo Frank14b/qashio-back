@@ -10,6 +10,19 @@ export class AccountResponseDto {
   @ApiProperty({ example: 'USD' })
   currencyCode!: string;
 
+  @ApiProperty({
+    example: '1500.00',
+    description: 'Decimal string formatted to the currency’s decimal places',
+  })
+  openingBalance!: string;
+
+  @ApiProperty({
+    example: '1342.75',
+    description:
+      'openingBalance + completed income − completed expense, formatted to the currency’s decimal places',
+  })
+  balance!: string;
+
   @ApiProperty({ example: true })
   isDefault!: boolean;
 

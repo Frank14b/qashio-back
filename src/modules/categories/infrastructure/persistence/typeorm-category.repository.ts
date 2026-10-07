@@ -49,6 +49,11 @@ export class TypeOrmCategoryRepository implements CategoryRepositoryPort {
     return rows.map((row) => this.toDomain(row));
   }
 
+  async findByIdForUser(id: string, userId: string): Promise<Category | null> {
+    const row = await this.categories.findOne({ where: { id, userId } });
+    return row ? this.toDomain(row) : null;
+  }
+
   async findNamesByUserId(userId: string): Promise<Set<string>> {
     const rows = await this.categories.find({
       where: { userId },

@@ -13,6 +13,7 @@ export interface CategoryRepositoryPort {
   create(input: CreateCategoryInput): Promise<Category>;
   createMany(inputs: CreateCategoryInput[]): Promise<Category[]>;
   findByUserId(userId: string): Promise<Category[]>;
+  findByIdForUser(id: string, userId: string): Promise<Category | null>;
   findNamesByUserId(userId: string): Promise<Set<string>>;
   existsByUserAndName(userId: string, name: string): Promise<boolean>;
 }

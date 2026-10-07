@@ -46,10 +46,12 @@ async function bootstrap() {
         },
         'bearer',
       )
+      .addTag('health', 'Liveness / readiness probes (public)')
       .addTag('auth', 'Registration, login, token refresh, and logout')
       .addTag('currencies', 'Seeded ISO 4217 reference currencies')
       .addTag('accounts', 'User wallets (Bearer access token required)')
       .addTag('categories', 'User categories (Bearer access token required)')
+      .addTag('transactions', 'Income / expense entries on wallets (Bearer access token required)')
       .build();
     const document = SwaggerModule.createDocument(app, swaggerConfig);
     SwaggerModule.setup('docs', app, document);

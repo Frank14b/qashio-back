@@ -1,9 +1,4 @@
-import {
-  BadRequestException,
-  ConflictException,
-  Inject,
-  Injectable,
-} from '@nestjs/common';
+import { ConflictException, Inject, Injectable } from '@nestjs/common';
 import { CategoryKind } from '../domain/category-kind';
 import { Category } from '../domain/entities/category.entity';
 import {
@@ -23,12 +18,9 @@ export class CreateCategoryUseCase {
     @Inject(CATEGORY_REPOSITORY) private readonly categories: CategoryRepositoryPort,
   ) {}
 
+  /** Rejecting a blank name is CreateCategoryRequestDto's job; here we only canonicalize. */
   async execute(command: CreateCategoryCommand): Promise<Category> {
     const name = command.name.trim();
-    if (!name) {
-      throw new BadRequestException('Category name is required');
-    }
-
     const exists = await this.categories.existsByUserAndName(command.userId, name);
     if (exists) {
       throw new ConflictException(`Category already exists: ${name}`);
