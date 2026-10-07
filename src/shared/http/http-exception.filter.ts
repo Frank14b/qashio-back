@@ -14,6 +14,8 @@ export type ErrorResponseBody = {
   message: string | string[];
   path: string;
   timestamp: string;
+  /** Same value as the X-Request-Id response header; quote it to find the server logs. */
+  requestId?: string;
 };
 
 @Catch()
@@ -40,6 +42,8 @@ export class HttpExceptionFilter implements ExceptionFilter {
       message,
       path: request.url,
       timestamp: new Date().toISOString(),
+      // Set by pino-http (LoggingModule) for every request.
+      requestId: (request as Request & { id?: string }).id,
     };
 
     response.status(statusCode).json(body);

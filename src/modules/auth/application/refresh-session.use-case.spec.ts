@@ -1,6 +1,7 @@
 import { UnauthorizedException } from '@nestjs/common';
 import {
   makeSession,
+  makeRefreshRotationStore,
   makeSessionRepository,
   makeTokenService,
   makeUser,
@@ -16,7 +17,12 @@ describe('RefreshSessionUseCase', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    useCase = new RefreshSessionUseCase(users as never, sessions as never, tokens as never);
+    useCase = new RefreshSessionUseCase(
+      users as never,
+      sessions as never,
+      tokens as never,
+      makeRefreshRotationStore() as never,
+    );
   });
 
   it('rotates refresh token and returns new tokens', async () => {

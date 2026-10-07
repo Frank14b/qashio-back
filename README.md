@@ -145,6 +145,14 @@ Pre-commit (Husky + lint-staged) runs ESLint and Prettier on staged files when h
 
 ## API surface
 
+### Observability & abuse protection
+
+- **Request id:** every response carries `X-Request-Id` (the caller's value if valid, else a UUID). Logs are structured JSON via `nestjs-pino` (pretty in dev); every line written while handling the request — including async event listeners (budgets, notifications) — has the same `req.id`. Error bodies include `requestId`; activity logs store it in `metadata.requestId`. The web app sends its own id per action (reused on the retry after a token refresh).
+- **Rate limits** (`@nestjs/throttler`, Redis storage, per IP): global `RATE_LIMIT_PER_MINUTE` (120); login, register, verify-email, forgot/reset password and change-password 5/min; refresh 30/min; `/health` exempt. Exceeding returns 429. Set `TRUST_PROXY` behind a load balancer.
+- **OTP brute force:** each code is discarded after 5 wrong attempts (per email, across IPs).
+- **Password reset binding:** `POST /auth/forgot-password` returns an `otpToken` (same shape for unknown emails); `POST /auth/reset-password` requires it with the OTP, so only the client that requested the code can use it. Only the token's hash is stored.
+- **Refresh rotation:** a Redis `SET NX` lock per refresh token makes rotation single-flight across requests and instances; the new pair is replayed for 30s to concurrent/late callers with the same old token (parallel calls, other tabs) instead of logging them out.
+
 ### Health (public)
 
 | Method | Path | Description |

@@ -11,6 +11,14 @@ export class ResetPasswordRequestDto {
   @Length(6, 6)
   otp!: string;
 
+  @ApiProperty({
+    description: 'otpToken returned by POST /auth/forgot-password for this request',
+    example: 'k3Jq0n4bX8m2...',
+  })
+  @IsString()
+  @Length(43, 43)
+  otpToken!: string;
+
   @ApiProperty({ minLength: 8, example: 'NewPassword1!' })
   @IsString()
   @MinLength(8)

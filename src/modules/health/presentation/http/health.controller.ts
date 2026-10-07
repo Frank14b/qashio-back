@@ -8,6 +8,7 @@ import {
   TypeOrmHealthIndicator,
 } from '@nestjs/terminus';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { SkipThrottle } from '@nestjs/throttler';
 import { RedisHealthIndicator } from '../../infrastructure/redis.health-indicator';
 
 const DEPENDENCY_TIMEOUT_MS = 1500;
@@ -18,6 +19,8 @@ const MB = 1024 * 1024;
  * HTTP 503, so pipelines and orchestrators can rely on the status code alone.
  */
 @ApiTags('health')
+// Probed by orchestrators and pipelines; must never be rate limited.
+@SkipThrottle()
 @Controller('health')
 export class HealthController {
   private readonly heapLimitBytes: number;

@@ -1,10 +1,21 @@
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  // Buffer boot logs until the pino logger is attached, so they carry the same format.
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: true });
+  app.useLogger(app.get(Logger));
+
+  // Behind a proxy/load balancer, trust X-Forwarded-For so rate limits see the client IP
+  // (e.g. TRUST_PROXY=1 for one hop). Off by default: the header is spoofable otherwise.
+  if (process.env.TRUST_PROXY) {
+    const hops = Number(process.env.TRUST_PROXY);
+    app.set('trust proxy', Number.isNaN(hops) ? process.env.TRUST_PROXY : hops);
+  }
 
   app.enableCors({
     origin: process.env.CORS_ORIGIN?.split(',').map((value) => value.trim()) ?? [
@@ -13,6 +24,8 @@ async function bootstrap() {
       'http://localhost:3000',
     ],
     credentials: true,
+    // Let the browser read the request id to correlate client errors with server logs.
+    exposedHeaders: ['X-Request-Id'],
   });
 
   app.useGlobalPipes(

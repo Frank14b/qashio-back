@@ -77,6 +77,7 @@ describe('ConfirmPasswordResetUseCase', () => {
     const result = await useCase.execute({
       email: 'jane@example.com',
       otp: '123456',
+      otpToken: 'otp-client-token',
       newPassword: 'NewSecret1!',
     });
 
@@ -84,6 +85,7 @@ describe('ConfirmPasswordResetUseCase', () => {
       'jane@example.com',
       OtpPurpose.PASSWORD_RESET,
       '123456',
+      'otp-client-token',
     );
     expect(passwords.hash).toHaveBeenCalledWith('NewSecret1!');
     expect(users.updatePasswordHash).toHaveBeenCalledWith(
@@ -102,6 +104,7 @@ describe('ConfirmPasswordResetUseCase', () => {
       useCase.execute({
         email: 'jane@example.com',
         otp: '000000',
+        otpToken: 'otp-client-token',
         newPassword: 'NewSecret1!',
       }),
     ).rejects.toBeInstanceOf(UnauthorizedException);

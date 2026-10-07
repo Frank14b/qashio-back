@@ -29,6 +29,8 @@ function getByPath(value: unknown, path?: string): string | null {
 
 type AuthenticatedRequest = Request & {
   user?: { sub?: string; id?: string };
+  /** Request id assigned by pino-http (LoggingModule). */
+  id?: string;
 };
 
 @Injectable()
@@ -66,6 +68,7 @@ export class ActivityLogInterceptor implements NestInterceptor {
             resourceId: getByPath(data, options.resourceIdFrom),
             ipAddress,
             userAgent,
+            metadata: req.id ? { requestId: req.id } : null,
           }),
         ).pipe(switchMap(() => of(options.emptyResponse ? undefined : data))),
       ),

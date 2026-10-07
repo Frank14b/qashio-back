@@ -18,6 +18,8 @@ import { PASSWORD_HASHER, PasswordHasherPort } from '../domain/ports/password-ha
 export type ConfirmPasswordResetCommand = {
   email: string;
   otp: string;
+  /** Token returned by forgot-password; binds the OTP to the client that requested it. */
+  otpToken: string;
   newPassword: string;
 };
 
@@ -37,7 +39,12 @@ export class ConfirmPasswordResetUseCase {
       throw new UnauthorizedException('Invalid email or OTP');
     }
 
-    const valid = await this.otp.verify(email, OtpPurpose.PASSWORD_RESET, command.otp);
+    const valid = await this.otp.verify(
+      email,
+      OtpPurpose.PASSWORD_RESET,
+      command.otp,
+      command.otpToken,
+    );
     if (!valid) {
       throw new UnauthorizedException('Invalid or expired OTP');
     }
