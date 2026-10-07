@@ -19,7 +19,12 @@ describe('Account opening balance', () => {
   });
 
   describe('on create', () => {
-    const useCase = () => new CreateAccountUseCase(accounts as never, currencies as never);
+    const useCase = () =>
+      new CreateAccountUseCase(
+        accounts as never,
+        currencies as never,
+        { emit: jest.fn() } as never,
+      );
 
     it('stores a normalized opening balance (negative allowed)', async () => {
       currencies.findByCode.mockResolvedValue({ code: 'USD', decimalPlaces: 2 });
@@ -54,7 +59,12 @@ describe('Account opening balance', () => {
   });
 
   describe('on update', () => {
-    const useCase = () => new UpdateAccountUseCase(accounts as never, currencies as never);
+    const useCase = () =>
+      new UpdateAccountUseCase(
+        accounts as never,
+        currencies as never,
+        { emit: jest.fn() } as never,
+      );
 
     beforeEach(() => {
       accounts.findByIdForUser.mockResolvedValue({

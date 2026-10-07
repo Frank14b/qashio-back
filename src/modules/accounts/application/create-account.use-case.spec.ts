@@ -14,7 +14,11 @@ describe('CreateAccountUseCase', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    useCase = new CreateAccountUseCase(accounts as never, currencies as never);
+    useCase = new CreateAccountUseCase(
+      accounts as never,
+      currencies as never,
+      { emit: jest.fn() } as never,
+    );
   });
 
   it('creates an account when currency exists', async () => {

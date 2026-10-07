@@ -52,6 +52,8 @@ async function bootstrap() {
       .addTag('accounts', 'User wallets (Bearer access token required)')
       .addTag('categories', 'User categories (Bearer access token required)')
       .addTag('transactions', 'Income / expense entries on wallets (Bearer access token required)')
+      .addTag('budgets', 'Spending limits per category and period (Bearer access token required)')
+      .addTag('notifications', 'In-app notifications (Bearer access token required)')
       .build();
     const document = SwaggerModule.createDocument(app, swaggerConfig);
     SwaggerModule.setup('docs', app, document);

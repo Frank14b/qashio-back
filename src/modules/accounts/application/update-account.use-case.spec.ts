@@ -13,7 +13,11 @@ describe('UpdateAccountUseCase', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    useCase = new UpdateAccountUseCase(accounts as never, currencies as never);
+    useCase = new UpdateAccountUseCase(
+      accounts as never,
+      currencies as never,
+      { emit: jest.fn() } as never,
+    );
   });
 
   it('archives an account and clears default via repository', async () => {

@@ -8,8 +8,16 @@ import {
   CURRENCY_REPOSITORY,
   CurrencyRepositoryPort,
 } from '@/modules/currencies/domain/ports/currency.repository.port';
+import {
+  DOMAIN_EVENT_PUBLISHER,
+  DomainEventPublisherPort,
+} from '@/shared/events/domain-event-publisher.port';
 import { parseMoneyInput } from '@/shared/money/money-input';
 import { Account } from '../domain/entities/account.entity';
+import {
+  ACCOUNT_UPDATED_EVENT,
+  AccountUpdatedPayload,
+} from '../domain/events/account.events';
 import {
   ACCOUNT_REPOSITORY,
   AccountRepositoryPort,
@@ -29,6 +37,7 @@ export class UpdateAccountUseCase {
   constructor(
     @Inject(ACCOUNT_REPOSITORY) private readonly accounts: AccountRepositoryPort,
     @Inject(CURRENCY_REPOSITORY) private readonly currencies: CurrencyRepositoryPort,
+    @Inject(DOMAIN_EVENT_PUBLISHER) private readonly events: DomainEventPublisherPort,
   ) {}
 
   async execute(command: UpdateAccountCommand): Promise<Account> {
@@ -70,11 +79,31 @@ export class UpdateAccountUseCase {
       archivedAt = null;
     }
 
-    return this.accounts.update(command.accountId, {
+    const updated = await this.accounts.update(command.accountId, {
       name: command.name?.trim(),
       isDefault: command.isDefault,
       archivedAt,
       openingBalance,
     });
+
+    const payload: AccountUpdatedPayload = {
+      accountId: updated.id,
+      userId: updated.userId,
+      name: updated.name,
+      currencyCode: updated.currencyCode,
+      changes: {
+        ...(updated.name !== existing.name && { name: { from: existing.name, to: updated.name } }),
+        ...(updated.isDefault !== existing.isDefault && { isDefault: updated.isDefault }),
+        ...(updated.isArchived !== existing.isArchived && { archived: updated.isArchived }),
+        ...(openingBalance !== undefined &&
+          updated.openingBalance !== existing.openingBalance && {
+            openingBalance: { from: existing.openingBalance, to: updated.openingBalance },
+          }),
+      },
+    };
+    if (Object.keys(payload.changes).length > 0) {
+      this.events.emit(ACCOUNT_UPDATED_EVENT, payload);
+    }
+    return updated;
   }
 }

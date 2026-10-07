@@ -265,6 +265,34 @@ Application rules: category `kind` compatible with `type` (`both` fits either); 
 
 Indexes: `(user_id, occurred_at)`, `(account_id, occurred_at)`, `(user_id, category_id, occurred_at)` (budget queries).
 
+### `budgets`
+
+| Column | Type | Notes |
+|--------|------|--------|
+| `id` | `uuid` PK | |
+| `user_id` | `uuid` | Owner |
+| `category_id` | `uuid` | Composite FK `(category_id, user_id)` → `categories`; expense or both (app rule) |
+| `account_id` | `uuid` | Composite FK `(account_id, user_id)` → `accounts`; the budget's currency is the wallet's |
+| `amount` | `numeric(19, 4)` | Limit per period, `> 0` |
+| `period` | `varchar(10)` | `weekly` | `monthly` | `yearly` |
+| `created_at` / `updated_at` | `timestamptz` | |
+
+One budget per scope: unique `(user_id, category_id, account_id, period)`. The API can create budgets for several categories at once (same wallet, limit and period; all or none). **Usage is never stored**: completed expenses in the category on that wallet within the current `date_trunc` period.
+
+### `notifications`
+
+| Column | Type | Notes |
+|--------|------|--------|
+| `id` | `uuid` PK | |
+| `user_id` | `uuid` | Recipient |
+| `type` | `varchar(40)` | Source event, e.g. `budget.threshold_reached` |
+| `title` / `message` | `varchar(160)` / `text` | Rendered at creation |
+| `data` | `jsonb` | Ids to link to (`transactionId`, `budgetId`, `accountId`) |
+| `read_at` | `timestamptz` nullable | |
+| `created_at` | `timestamptz` | |
+
+Indexes: `(user_id, created_at)`, partial `(user_id) WHERE read_at IS NULL` for the unread badge.
+
 ---
 
 ## Auth model (access + refresh)

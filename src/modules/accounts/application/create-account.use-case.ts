@@ -3,8 +3,16 @@ import {
   CURRENCY_REPOSITORY,
   CurrencyRepositoryPort,
 } from '@/modules/currencies/domain/ports/currency.repository.port';
+import {
+  DOMAIN_EVENT_PUBLISHER,
+  DomainEventPublisherPort,
+} from '@/shared/events/domain-event-publisher.port';
 import { parseMoneyInput } from '@/shared/money/money-input';
 import { Account } from '../domain/entities/account.entity';
+import {
+  ACCOUNT_CREATED_EVENT,
+  AccountCreatedPayload,
+} from '../domain/events/account.events';
 import {
   ACCOUNT_REPOSITORY,
   AccountRepositoryPort,
@@ -23,6 +31,7 @@ export class CreateAccountUseCase {
   constructor(
     @Inject(ACCOUNT_REPOSITORY) private readonly accounts: AccountRepositoryPort,
     @Inject(CURRENCY_REPOSITORY) private readonly currencies: CurrencyRepositoryPort,
+    @Inject(DOMAIN_EVENT_PUBLISHER) private readonly events: DomainEventPublisherPort,
   ) {}
 
   /** Rejecting a blank name is CreateAccountRequestDto's job; here we only canonicalize. */
@@ -52,12 +61,22 @@ export class CreateAccountUseCase {
       await this.accounts.clearDefaultForUser(command.userId);
     }
 
-    return this.accounts.create({
+    const account = await this.accounts.create({
       userId: command.userId,
       name,
       currencyCode,
       isDefault,
       openingBalance,
     });
+
+    const payload: AccountCreatedPayload = {
+      accountId: account.id,
+      userId: account.userId,
+      name: account.name,
+      currencyCode: account.currencyCode,
+      openingBalance: account.openingBalance,
+    };
+    this.events.emit(ACCOUNT_CREATED_EVENT, payload);
+    return account;
   }
 }

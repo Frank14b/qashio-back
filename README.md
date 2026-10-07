@@ -185,7 +185,22 @@ Memory limits: `HEALTH_MEMORY_HEAP_MB` (default 512), `HEALTH_MEMORY_RSS_MB` (de
 
 **Money in / out:** `amount` is always positive; `type` gives the direction — `income` adds to the wallet, `expense` subtracts. Responses include `direction` (`in`/`out`) and `signedAmount`. Wallet `balance` = `openingBalance` + completed income − completed expense (derived, never stored). Amounts are decimal strings formatted to the currency's decimal places.
 
-**Events:** `transaction.created`, `transaction.updated` (previous + current snapshot), `transaction.deleted` via `EventEmitter` — ready for budget listeners.
+**Events:** `transaction.created`, `transaction.updated` (previous + current snapshot), `transaction.deleted` via `EventEmitter`.
+
+### Budgets & notifications
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/budgets` | Bearer | Create budgets on a wallet: `accountId`, `categoryIds[]` (expense/both; one budget each, all or none), `amount`, `period` (`weekly` | `monthly` | `yearly`). Currency is the wallet's |
+| `GET` | `/budgets` | Bearer | List with current-period `usage` (spent, remaining, percentUsed, status) |
+| `GET` | `/budgets/:id` | Bearer | Get one with usage |
+| `PATCH` | `/budgets/:id` | Bearer | Change `amount` and/or `period` (scope is fixed) |
+| `DELETE` | `/budgets/:id` | Bearer | Delete (204) |
+| `GET` | `/notifications` | Bearer | Newest notifications (`limit` ≤ 50, `unreadOnly`) + `unreadCount` |
+| `PATCH` | `/notifications/:id/read` | Bearer | Mark one read (idempotent, 204) |
+| `POST` | `/notifications/read-all` | Bearer | Mark all read (204) |
+
+**Flow:** transaction events → budgets listener recomputes usage and emits `budget.threshold_reached` when *this* change crosses 80% or 100% (once per crossing, not on every later expense) → notifications listener stores an in-app notification and emails budget alerts. Transaction and account events (`account.created`, `account.updated`) become in-app notifications only. Usage is derived from transactions, never stored; periods follow Postgres `date_trunc` in the DB time zone (ISO weeks start Monday).
 
 **Default categories:** after `POST /auth/verify-email`, Nest `EventEmitter` emits `user.activated`; `UserActivatedListener` creates a sensible default set (Food, Transport, Salary, …) idempotently by name.
 
@@ -193,7 +208,6 @@ Memory limits: `HEALTH_MEMORY_HEAP_MB` (default 512), `HEALTH_MEMORY_RSS_MB` (de
 
 | Area | Notes |
 |------|-------|
-| Budgets | Per category / period + usage |
 
 ---
 
@@ -218,12 +232,13 @@ Memory limits: `HEALTH_MEMORY_HEAP_MB` (default 512), `HEALTH_MEMORY_RSS_MB` (de
 
 ### Next — core modules
 
-- [ ] `BudgetsModule` (per category / period + usage)
+- [x] `BudgetsModule` (per category / period, derived usage, threshold alerts)
+- [x] `NotificationsModule` (in-app feed + email for budget alerts)
 
 ### Next — event-driven budget check
 
 - [x] Emit domain event on transaction create/update/delete (Nest `EventEmitter`)
-- [ ] Listener: log activity + recompute / check budget usage
+- [x] Listener: check budget usage on transaction events
 - [ ] Redis cache for hot reads (categories, budget summary)
 - [ ] Optional Bull queue for heavier async work (email batches, multi-instance reliability)
 

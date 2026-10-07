@@ -13,10 +13,12 @@ export type TransactionSnapshot = {
   userId: string;
   accountId: string;
   categoryId: string;
+  categoryName: string;
   type: TransactionType;
   amount: string;
   currencyCode: string;
   status: TransactionStatus;
+  counterparty: string | null;
   occurredAt: string;
 };
 
@@ -35,10 +37,12 @@ export function toTransactionSnapshot(transaction: Transaction): TransactionSnap
     userId: transaction.userId,
     accountId: transaction.accountId,
     categoryId: transaction.categoryId,
+    categoryName: transaction.category.name,
     type: transaction.type,
     amount: transaction.amount,
     currencyCode: transaction.account.currencyCode,
     status: transaction.status,
+    counterparty: transaction.counterparty,
     occurredAt: transaction.occurredAt.toISOString(),
   };
 }
