@@ -29,8 +29,9 @@ async function bootstrap() {
       'http://localhost:3000',
     ],
     credentials: true,
-    // Let the browser read the request id to correlate client errors with server logs.
-    exposedHeaders: ['X-Request-Id'],
+    // Let the browser read the request id to correlate client errors with server logs,
+    // and tell a replayed create (same Idempotency-Key) from a new one.
+    exposedHeaders: ['X-Request-Id', 'Idempotent-Replayed'],
   });
 
   app.useGlobalPipes(

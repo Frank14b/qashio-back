@@ -12,8 +12,17 @@ export class DuplicateTransactionReferenceError extends Error {
   }
 }
 
+/** Raised by `create` when the user already has a transaction with this idempotency key. */
+export class DuplicateIdempotencyKeyError extends Error {
+  constructor(idempotencyKey: string) {
+    super(`Idempotency key already used: ${idempotencyKey}`);
+    this.name = 'DuplicateIdempotencyKeyError';
+  }
+}
+
 export type CreateTransactionInput = {
   reference: string;
+  idempotencyKey: string;
   userId: string;
   accountId: string;
   categoryId: string;
@@ -81,10 +90,28 @@ export type CurrencyTotals = {
   count: number;
 };
 
+/** A new entry that looks like one the user just recorded (likely re-entered by mistake). */
+export type PossibleDuplicateQuery = {
+  userId: string;
+  accountId: string;
+  categoryId: string;
+  type: TransactionType;
+  amount: string;
+  /** When set, only entries with the same counterparty (case-insensitive) match. */
+  counterparty: string | null;
+  /** Only entries created at or after this instant match. */
+  createdSince: Date;
+  /** Rows created by this same request key are retries, not look-alikes. */
+  excludeIdempotencyKey: string;
+};
+
 export interface TransactionRepositoryPort {
-  /** @throws DuplicateTransactionReferenceError */
+  /** @throws DuplicateTransactionReferenceError | DuplicateIdempotencyKeyError */
   create(input: CreateTransactionInput): Promise<Transaction>;
   findByIdForUser(id: string, userId: string): Promise<Transaction | null>;
+  findByIdempotencyKey(userId: string, idempotencyKey: string): Promise<Transaction | null>;
+  /** Most recent match, if any. */
+  findPossibleDuplicate(query: PossibleDuplicateQuery): Promise<Transaction | null>;
   findMany(query: ListTransactionsQuery): Promise<TransactionPage>;
   update(id: string, input: UpdateTransactionInput): Promise<Transaction>;
   delete(id: string): Promise<void>;

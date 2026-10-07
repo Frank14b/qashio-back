@@ -21,6 +21,11 @@ import { CategoryOrmEntity } from '@/modules/categories/infrastructure/persisten
 @Index('IDX_transactions_user_occurred_at', ['userId', 'occurredAt'])
 @Index('IDX_transactions_account_occurred_at', ['accountId', 'occurredAt'])
 @Index('IDX_transactions_user_category_occurred_at', ['userId', 'categoryId', 'occurredAt'])
+// One row per client action: a retried create carrying the same key can never insert twice.
+@Index('UQ_transactions_user_idempotency_key', ['userId', 'idempotencyKey'], {
+  unique: true,
+  where: '"idempotency_key" IS NOT NULL',
+})
 export class TransactionOrmEntity {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
@@ -81,6 +86,10 @@ export class TransactionOrmEntity {
 
   @Column({ name: 'occurred_at', type: 'timestamptz' })
   occurredAt!: Date;
+
+  /** `Idempotency-Key` of the create request; null for rows created before keys existed. */
+  @Column({ name: 'idempotency_key', type: 'uuid', nullable: true })
+  idempotencyKey!: string | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;

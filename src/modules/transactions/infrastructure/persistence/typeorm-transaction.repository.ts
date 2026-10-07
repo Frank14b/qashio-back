@@ -6,8 +6,10 @@ import { Transaction } from '../../domain/entities/transaction.entity';
 import {
   CreateTransactionInput,
   CurrencyTotals,
+  DuplicateIdempotencyKeyError,
   DuplicateTransactionReferenceError,
   ListTransactionsQuery,
+  PossibleDuplicateQuery,
   TransactionPage,
   TransactionRepositoryPort,
   TransactionSortField,
@@ -20,6 +22,7 @@ import { TransactionOrmEntity } from './transaction.orm-entity';
 
 const PG_UNIQUE_VIOLATION = '23505';
 const REFERENCE_CONSTRAINT = 'UQ_transactions_reference';
+const IDEMPOTENCY_KEY_CONSTRAINT = 'UQ_transactions_user_idempotency_key';
 const DEFAULT_DECIMAL_PLACES = 2;
 
 const SORT_COLUMNS: Record<TransactionSortField, string> = {
@@ -42,6 +45,7 @@ export class TypeOrmTransactionRepository implements TransactionRepositoryPort {
     try {
       const result = await this.transactions.insert({
         reference: input.reference,
+        idempotencyKey: input.idempotencyKey,
         userId: input.userId,
         accountId: input.accountId,
         categoryId: input.categoryId,
@@ -54,8 +58,12 @@ export class TypeOrmTransactionRepository implements TransactionRepositoryPort {
       });
       id = (result.identifiers[0] as { id: string }).id;
     } catch (error) {
-      if (this.isDuplicateReference(error)) {
+      const constraint = this.uniqueViolationConstraint(error);
+      if (constraint === REFERENCE_CONSTRAINT) {
         throw new DuplicateTransactionReferenceError(input.reference);
+      }
+      if (constraint === IDEMPOTENCY_KEY_CONSTRAINT) {
+        throw new DuplicateIdempotencyKeyError(input.idempotencyKey);
       }
       throw error;
     }
@@ -67,6 +75,34 @@ export class TypeOrmTransactionRepository implements TransactionRepositoryPort {
       .where('t.id = :id', { id })
       .andWhere('t.user_id = :userId', { userId })
       .getOne();
+    return row ? this.toDomain(row) : null;
+  }
+
+  async findByIdempotencyKey(userId: string, idempotencyKey: string): Promise<Transaction | null> {
+    const row = await this.baseQuery()
+      .where('t.user_id = :userId', { userId })
+      .andWhere('t.idempotency_key = :idempotencyKey', { idempotencyKey })
+      .getOne();
+    return row ? this.toDomain(row) : null;
+  }
+
+  async findPossibleDuplicate(query: PossibleDuplicateQuery): Promise<Transaction | null> {
+    const qb = this.baseQuery()
+      .where('t.user_id = :userId', { userId: query.userId })
+      .andWhere('t.account_id = :accountId', { accountId: query.accountId })
+      .andWhere('t.category_id = :categoryId', { categoryId: query.categoryId })
+      .andWhere('t.type = :type', { type: query.type })
+      .andWhere('t.amount = :amount', { amount: query.amount })
+      .andWhere('t.created_at >= :createdSince', { createdSince: query.createdSince })
+      .andWhere('t.idempotency_key IS DISTINCT FROM :excludeKey', {
+        excludeKey: query.excludeIdempotencyKey,
+      });
+    if (query.counterparty) {
+      qb.andWhere('LOWER(t.counterparty) = LOWER(:counterparty)', {
+        counterparty: query.counterparty,
+      });
+    }
+    const row = await qb.orderBy('t.created_at', 'DESC').getOne();
     return row ? this.toDomain(row) : null;
   }
 
@@ -194,14 +230,12 @@ export class TypeOrmTransactionRepository implements TransactionRepositoryPort {
     return this.toDomain(row);
   }
 
-  private isDuplicateReference(error: unknown): boolean {
+  private uniqueViolationConstraint(error: unknown): string | undefined {
     if (!(error instanceof QueryFailedError)) {
-      return false;
+      return undefined;
     }
     const driverError = error.driverError as { code?: string; constraint?: string };
-    return (
-      driverError.code === PG_UNIQUE_VIOLATION && driverError.constraint === REFERENCE_CONSTRAINT
-    );
+    return driverError.code === PG_UNIQUE_VIOLATION ? driverError.constraint : undefined;
   }
 
   private toDomain(row: TransactionOrmEntity): Transaction {

@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  IsBoolean,
   IsDateString,
   IsEnum,
   IsOptional,
@@ -59,4 +60,13 @@ export class CreateTransactionRequestDto {
   @IsOptional()
   @IsDateString()
   occurredAt?: string;
+
+  @ApiPropertyOptional({
+    example: false,
+    description:
+      'Set after a 409 POSSIBLE_DUPLICATE to save anyway (resend with the same Idempotency-Key).',
+  })
+  @IsOptional()
+  @IsBoolean()
+  confirmDuplicate?: boolean;
 }

@@ -1,7 +1,9 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
+  ExecutionContext,
   Get,
   HttpCode,
   HttpStatus,
@@ -10,19 +12,25 @@ import {
   Post,
   Put,
   Query,
+  Res,
   UseGuards,
+  createParamDecorator,
 } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
+  ApiConflictResponse,
   ApiCreatedResponse,
+  ApiHeader,
   ApiNoContentResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
   ApiTags,
   ApiUnauthorizedResponse,
+  ApiUnprocessableEntityResponse,
 } from '@nestjs/swagger';
+import type { Request, Response } from 'express';
 import { ActivityAction } from '@/modules/activity-logs/domain/activity-action.enum';
 import { LogActivity } from '@/modules/activity-logs/presentation/decorators/log-activity.decorator';
 import {
@@ -53,6 +61,15 @@ import { UpdateTransactionRequestDto } from './dto/update-transaction-request.dt
 
 const toDate = (value?: string): Date | undefined => (value ? new Date(value) : undefined);
 
+/** Raw `Idempotency-Key` header; pass a pipe to validate it. */
+const IdempotencyKey = createParamDecorator((_: unknown, ctx: ExecutionContext) =>
+  ctx.switchToHttp().getRequest<Request>().header('idempotency-key'),
+);
+
+const idempotencyKeyPipe = new ParseUUIDPipe({
+  exceptionFactory: () => new BadRequestException('Idempotency-Key header must be a UUID'),
+});
+
 @ApiTags('transactions')
 @ApiBearerAuth('bearer')
 @UseGuards(JwtAuthGuard)
@@ -75,15 +92,35 @@ export class TransactionsController {
     resourceIdFrom: 'id',
   })
   @ApiOperation({ summary: 'Record an income or expense on a wallet' })
+  @ApiHeader({
+    name: 'Idempotency-Key',
+    required: true,
+    description:
+      'UUID generated once per user action and reused on retries. A retry returns the original ' +
+      'transaction with `Idempotent-Replayed: true` instead of saving it twice.',
+  })
   @ApiCreatedResponse({ type: TransactionResponseDto })
   @ApiBadRequestResponse({ type: ErrorResponseDto })
   @ApiNotFoundResponse({ type: ErrorResponseDto, description: 'Account or category not found' })
+  @ApiConflictResponse({
+    type: ErrorResponseDto,
+    description:
+      'code POSSIBLE_DUPLICATE: a matching entry was recorded moments ago (see details.duplicateOf)',
+  })
+  @ApiUnprocessableEntityResponse({
+    type: ErrorResponseDto,
+    description: 'Idempotency-Key already used with a different payload',
+  })
   async create(
     @CurrentUser() user: AccessTokenUser,
+    @IdempotencyKey(idempotencyKeyPipe) idempotencyKey: string,
     @Body() body: CreateTransactionRequestDto,
+    @Res({ passthrough: true }) res: Response,
   ): Promise<TransactionResponseDto> {
-    const transaction = await this.createTransaction.execute({
+    const { transaction, replayed } = await this.createTransaction.execute({
       userId: user.sub,
+      idempotencyKey,
+      confirmDuplicate: body.confirmDuplicate,
       accountId: body.accountId,
       categoryId: body.categoryId,
       type: body.type,
@@ -92,6 +129,9 @@ export class TransactionsController {
       narration: body.narration,
       occurredAt: toDate(body.occurredAt),
     });
+    if (replayed) {
+      res.setHeader('Idempotent-Replayed', 'true');
+    }
     return this.toResponse(transaction);
   }
 

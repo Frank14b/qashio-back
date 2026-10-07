@@ -187,7 +187,7 @@ Memory limits: `HEALTH_MEMORY_HEAP_MB` (default 512), `HEALTH_MEMORY_RSS_MB` (de
 | `PATCH` | `/accounts/:id` | Bearer | Rename / opening balance / set default / archive |
 | `POST` | `/categories` | Bearer | Create category |
 | `GET` | `/categories` | Bearer | List categories |
-| `POST` | `/transactions` | Bearer | Record income / expense (`accountId` optional → default wallet) |
+| `POST` | `/transactions` | Bearer | Record income / expense (`accountId` optional → default wallet). **Requires `Idempotency-Key: <uuid>`** |
 | `GET` | `/transactions` | Bearer | List — `page`, `limit` (≤100), `sortBy`, `sortOrder`, `accountId`, `categoryId`, `type`, `status`, `from`, `to`, `search` |
 | `GET` | `/transactions/summary` | Bearer | Completed income / expense / net per currency (`accountId`, `from`, `to`) |
 | `GET` | `/transactions/:id` | Bearer | Get one |
@@ -195,6 +195,10 @@ Memory limits: `HEALTH_MEMORY_HEAP_MB` (default 512), `HEALTH_MEMORY_RSS_MB` (de
 | `DELETE` | `/transactions/:id` | Bearer | Delete (204) |
 
 **Money in / out:** `amount` is always positive; `type` gives the direction — `income` adds to the wallet, `expense` subtracts. Responses include `direction` (`in`/`out`) and `signedAmount`. Wallet `balance` = `openingBalance` + completed income − completed expense (derived, never stored). Amounts are decimal strings formatted to the currency's decimal places.
+
+**Duplicate protection on create:**
+- *Retries / double-sends* — the client generates one `Idempotency-Key` (UUID) per user action and reuses it on every retry. The key is stored on the row (unique per user, `UQ_transactions_user_idempotency_key`), so the same action can never insert twice, even when requests race. A retry returns the original transaction with `Idempotent-Replayed: true`; reusing a key with a different payload → `422`. Missing / non-UUID key → `400`.
+- *Accidental re-entry* — a **new** key whose wallet, type, category, amount (and counterparty, if given) match an entry created in the last 2 minutes → `409` with `code: "POSSIBLE_DUPLICATE"` and `details.duplicateOf`. The UI asks the user; "Save anyway" resends with `confirmDuplicate: true` and the same key.
 
 **Events:** `transaction.created`, `transaction.updated` (previous + current snapshot), `transaction.deleted` via `EventEmitter`.
 

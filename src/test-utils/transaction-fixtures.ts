@@ -81,6 +81,8 @@ export function makeTransactionRepository() {
   return {
     create: jest.fn(),
     findByIdForUser: jest.fn(),
+    findByIdempotencyKey: jest.fn().mockResolvedValue(null),
+    findPossibleDuplicate: jest.fn().mockResolvedValue(null),
     findMany: jest.fn(),
     update: jest.fn(),
     delete: jest.fn(),

@@ -24,6 +24,7 @@ describe('CreateTransactionUseCase', () => {
 
   const baseCommand = {
     userId: 'user-1',
+    idempotencyKey: '6f1c2b9e-1d4a-4c3e-9b7a-2f8d5e0a1c34',
     accountId: 'acc-1',
     categoryId: 'cat-food',
     type: TransactionType.EXPENSE,
