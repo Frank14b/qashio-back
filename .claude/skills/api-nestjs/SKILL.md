@@ -17,6 +17,7 @@ description: >-
 - **Do not add Kafka** unless the user explicitly asks. Prefer Nest `EventEmitter` and Redis/Bull for async work.
 - **Do not modify existing unit tests** (`*.spec.ts`) to make them pass when implementing features or refactors. Prefer writing **new** tests for new behavior. Only change an existing test when the user explicitly asks, or when the public contract intentionally changes and the user approved updating that contract — never silently rewrite assertions to match buggy or new behavior. Changing old tests can hide regressions / silent breaking changes.
 - Prefer official NestJS patterns (modules, DI, DTOs, pipes, filters) over inventing frameworks.
+- **Git push branches.** Each push must be on a **feature branch** (`feature/...`) or, for bugs, a **bugfix branch** (`fix/...` or `bugfix/...`). Never push commits directly to `main` / `master` unless the user explicitly requests it. If work is on `main`, create/checkout the appropriate branch before committing and pushing.
 
 ## Prettier (match `.prettierrc`)
 
