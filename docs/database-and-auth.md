@@ -416,8 +416,8 @@ Recommended first build order:
 
 ## Implemented decisions (accounts / currencies / categories)
 
-1. **Default wallet** — not auto-created on register/verify; client calls `POST /accounts`. First wallet for a user becomes `is_default` automatically if `isDefault` is omitted.
+1. **Default wallets** — on verify-email, Nest `EventEmitter` event `user.activated` triggers accounts `UserActivatedListener` → `CreateDefaultAccountsUseCase` inserts starter wallets idempotently by name (`Cash` default USD, `Bank`, `Credit Card`). Users can rename / change default / archive later via `PATCH /accounts/:id`. Manual `POST /accounts` still works; first manually created wallet becomes `is_default` if none is set and `isDefault` is omitted.
 2. **Currency change** — forbidden after create (column fixed; no PATCH for `currencyCode`).
 3. **Refresh rotation** — always rotate on refresh (auth module).
 4. **Currency seed** — idempotent upsert by `code` on boot when `SEED_CURRENCIES=true` or `TYPEORM_SYNC=true` (unless `SEED_CURRENCIES=false`); also `npm run seed`.
-5. **Default categories** — Nest `EventEmitter` event `user.activated` from verify-email; `UserActivatedListener` inserts defaults idempotently (skip names the user already has). Prefer EventEmitter over Bull for this small in-process write; use Bull later for heavy/retryable/multi-instance jobs.
+5. **Default categories** — same `user.activated` event; categories `UserActivatedListener` inserts defaults idempotently (skip names the user already has). Prefer EventEmitter over Bull for this small in-process write; use Bull later for heavy/retryable/multi-instance jobs.

@@ -22,9 +22,11 @@ export type ListAccountsQuery = {
 
 export interface AccountRepositoryPort {
   create(input: CreateAccountInput): Promise<Account>;
+  createMany(inputs: CreateAccountInput[]): Promise<Account[]>;
   findById(id: string): Promise<Account | null>;
   findByIdForUser(id: string, userId: string): Promise<Account | null>;
   findMany(query: ListAccountsQuery): Promise<Account[]>;
+  findNamesByUserId(userId: string): Promise<Set<string>>;
   countActiveForUser(userId: string): Promise<number>;
   clearDefaultForUser(userId: string): Promise<void>;
   update(id: string, input: UpdateAccountInput): Promise<Account>;

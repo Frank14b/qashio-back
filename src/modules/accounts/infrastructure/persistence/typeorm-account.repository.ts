@@ -29,6 +29,23 @@ export class TypeOrmAccountRepository implements AccountRepositoryPort {
     return this.toDomain(saved);
   }
 
+  async createMany(inputs: CreateAccountInput[]): Promise<Account[]> {
+    if (inputs.length === 0) {
+      return [];
+    }
+    const rows = inputs.map((input) =>
+      this.accounts.create({
+        userId: input.userId,
+        name: input.name,
+        currencyCode: input.currencyCode.toUpperCase(),
+        isDefault: input.isDefault,
+        archivedAt: null,
+      }),
+    );
+    const saved = await this.accounts.save(rows);
+    return saved.map((row) => this.toDomain(row));
+  }
+
   async findById(id: string): Promise<Account | null> {
     const row = await this.accounts.findOne({ where: { id } });
     return row ? this.toDomain(row) : null;
@@ -48,6 +65,14 @@ export class TypeOrmAccountRepository implements AccountRepositoryPort {
       order: { isDefault: 'DESC', createdAt: 'ASC' },
     });
     return rows.map((row) => this.toDomain(row));
+  }
+
+  async findNamesByUserId(userId: string): Promise<Set<string>> {
+    const rows = await this.accounts.find({
+      where: { userId },
+      select: ['name'],
+    });
+    return new Set(rows.map((row) => row.name));
   }
 
   async countActiveForUser(userId: string): Promise<number> {
