@@ -8,6 +8,7 @@ import {
   CURRENCY_REPOSITORY,
   CurrencyRepositoryPort,
 } from '@/modules/currencies/domain/ports/currency.repository.port';
+import { UNIT_OF_WORK, UnitOfWorkPort } from '@/shared/database/unit-of-work.port';
 import {
   DOMAIN_EVENT_PUBLISHER,
   DomainEventPublisherPort,
@@ -38,6 +39,7 @@ export class UpdateAccountUseCase {
     @Inject(ACCOUNT_REPOSITORY) private readonly accounts: AccountRepositoryPort,
     @Inject(CURRENCY_REPOSITORY) private readonly currencies: CurrencyRepositoryPort,
     @Inject(DOMAIN_EVENT_PUBLISHER) private readonly events: DomainEventPublisherPort,
+    @Inject(UNIT_OF_WORK) private readonly unitOfWork: UnitOfWorkPort,
   ) {}
 
   async execute(command: UpdateAccountCommand): Promise<Account> {
@@ -68,10 +70,6 @@ export class UpdateAccountUseCase {
       });
     }
 
-    if (command.isDefault === true) {
-      await this.accounts.clearDefaultForUser(command.userId);
-    }
-
     let archivedAt: Date | null | undefined;
     if (command.archive === true) {
       archivedAt = existing.archivedAt ?? new Date();
@@ -79,31 +77,38 @@ export class UpdateAccountUseCase {
       archivedAt = null;
     }
 
-    const updated = await this.accounts.update(command.accountId, {
-      name: command.name?.trim(),
-      isDefault: command.isDefault,
-      archivedAt,
-      openingBalance,
-    });
+    // Default switch, update and account.updated event commit together.
+    return this.unitOfWork.run(async () => {
+      if (command.isDefault === true) {
+        await this.accounts.clearDefaultForUser(command.userId);
+      }
 
-    const payload: AccountUpdatedPayload = {
-      accountId: updated.id,
-      userId: updated.userId,
-      name: updated.name,
-      currencyCode: updated.currencyCode,
-      changes: {
-        ...(updated.name !== existing.name && { name: { from: existing.name, to: updated.name } }),
-        ...(updated.isDefault !== existing.isDefault && { isDefault: updated.isDefault }),
-        ...(updated.isArchived !== existing.isArchived && { archived: updated.isArchived }),
-        ...(openingBalance !== undefined &&
-          updated.openingBalance !== existing.openingBalance && {
-            openingBalance: { from: existing.openingBalance, to: updated.openingBalance },
-          }),
-      },
-    };
-    if (Object.keys(payload.changes).length > 0) {
-      this.events.emit(ACCOUNT_UPDATED_EVENT, payload);
-    }
-    return updated;
+      const updated = await this.accounts.update(command.accountId, {
+        name: command.name?.trim(),
+        isDefault: command.isDefault,
+        archivedAt,
+        openingBalance,
+      });
+
+      const payload: AccountUpdatedPayload = {
+        accountId: updated.id,
+        userId: updated.userId,
+        name: updated.name,
+        currencyCode: updated.currencyCode,
+        changes: {
+          ...(updated.name !== existing.name && { name: { from: existing.name, to: updated.name } }),
+          ...(updated.isDefault !== existing.isDefault && { isDefault: updated.isDefault }),
+          ...(updated.isArchived !== existing.isArchived && { archived: updated.isArchived }),
+          ...(openingBalance !== undefined &&
+            updated.openingBalance !== existing.openingBalance && {
+              openingBalance: { from: existing.openingBalance, to: updated.openingBalance },
+            }),
+        },
+      };
+      if (Object.keys(payload.changes).length > 0) {
+        await this.events.emit(ACCOUNT_UPDATED_EVENT, payload);
+      }
+      return updated;
+    });
   }
 }

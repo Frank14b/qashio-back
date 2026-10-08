@@ -47,6 +47,17 @@ describe('NotifyUserUseCase', () => {
     );
   });
 
+  it('does not email again when the event was already notified (replayed delivery)', async () => {
+    notifications.create.mockResolvedValueOnce(null);
+
+    await useCase.execute({ ...alert, eventId: 'evt-1' });
+
+    expect(notifications.create).toHaveBeenCalledWith(
+      expect.objectContaining({ eventId: 'evt-1' }),
+    );
+    expect(emails.send).not.toHaveBeenCalled();
+  });
+
   it('keeps the notification when the email fails', async () => {
     emails.send.mockRejectedValue(new Error('SMTP down'));
 

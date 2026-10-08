@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { UNIT_OF_WORK, UnitOfWorkPort } from '@/shared/database/unit-of-work.port';
 import {
   DOMAIN_EVENT_PUBLISHER,
   DomainEventPublisherPort,
@@ -42,6 +43,7 @@ export class UpdateTransactionUseCase {
     @Inject(TRANSACTION_REPOSITORY) private readonly transactions: TransactionRepositoryPort,
     @Inject(DOMAIN_EVENT_PUBLISHER) private readonly events: DomainEventPublisherPort,
     private readonly rules: TransactionRules,
+    @Inject(UNIT_OF_WORK) private readonly unitOfWork: UnitOfWorkPort,
   ) {}
 
   async execute(command: UpdateTransactionCommand): Promise<Transaction> {
@@ -85,13 +87,15 @@ export class UpdateTransactionUseCase {
     patch.narration = cleanOptionalText(command.narration);
     patch.occurredAt = command.occurredAt;
 
-    const updated = await this.transactions.update(existing.id, patch);
-
-    const payload: TransactionUpdatedPayload = {
-      previous: toTransactionSnapshot(existing),
-      current: toTransactionSnapshot(updated),
-    };
-    this.events.emit(TRANSACTION_UPDATED_EVENT, payload);
-    return updated;
+    // The change and its transaction.updated event commit together.
+    return this.unitOfWork.run(async () => {
+      const updated = await this.transactions.update(existing.id, patch);
+      const payload: TransactionUpdatedPayload = {
+        previous: toTransactionSnapshot(existing),
+        current: toTransactionSnapshot(updated),
+      };
+      await this.events.emit(TRANSACTION_UPDATED_EVENT, payload);
+      return updated;
+    });
   }
 }

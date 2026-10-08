@@ -19,7 +19,7 @@ export class DomainEventsProcessor extends WorkerHost {
       // Handler renamed or removed since the job was queued: retrying cannot help.
       throw new UnrecoverableError(`No domain event handler "${job.data.handler}"`);
     }
-    await handler.invoke(job.data.payload);
+    await handler.invoke(job.data.payload, { eventId: job.data.eventId });
   }
 
   @OnWorkerEvent('failed')

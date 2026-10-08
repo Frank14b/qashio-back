@@ -1,5 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { CreateAccountUseCase } from './create-account.use-case';
+import { inlineUnitOfWork } from '@/test-utils/unit-of-work';
 
 describe('CreateAccountUseCase', () => {
   const accounts = {
@@ -18,6 +19,7 @@ describe('CreateAccountUseCase', () => {
       accounts as never,
       currencies as never,
       { emit: jest.fn() } as never,
+      inlineUnitOfWork,
     );
   });
 

@@ -9,10 +9,13 @@ export type CreateNotificationInput = {
   title: string;
   message: string;
   data: NotificationData;
+  /** Source domain event; a second notification for the same event is not stored. */
+  eventId?: string;
 };
 
 export interface NotificationRepositoryPort {
-  create(input: CreateNotificationInput): Promise<Notification>;
+  /** Returns null when a notification for `eventId` already exists (a replayed event). */
+  create(input: CreateNotificationInput): Promise<Notification | null>;
   /** Newest first. */
   findRecent(userId: string, options: { limit: number; unreadOnly: boolean }): Promise<Notification[]>;
   countUnread(userId: string): Promise<number>;

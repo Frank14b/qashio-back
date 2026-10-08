@@ -1,6 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import { CreateAccountUseCase } from './create-account.use-case';
 import { UpdateAccountUseCase } from './update-account.use-case';
+import { inlineUnitOfWork } from '@/test-utils/unit-of-work';
 
 describe('Account opening balance', () => {
   const accounts = {
@@ -24,6 +25,7 @@ describe('Account opening balance', () => {
         accounts as never,
         currencies as never,
         { emit: jest.fn() } as never,
+        inlineUnitOfWork,
       );
 
     it('stores a normalized opening balance (negative allowed)', async () => {
@@ -64,6 +66,7 @@ describe('Account opening balance', () => {
         accounts as never,
         currencies as never,
         { emit: jest.fn() } as never,
+        inlineUnitOfWork,
       );
 
     beforeEach(() => {

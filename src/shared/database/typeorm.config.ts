@@ -11,7 +11,8 @@ export function buildTypeOrmOptions(url: string): DataSourceOptions {
     type: 'postgres',
     url,
     synchronize: false,
-    entities: [join(__dirname, '..', '..', 'modules', '**', '*.orm-entity.{ts,js}')],
+    // Module entities plus shared infrastructure tables (e.g. the event outbox).
+    entities: [join(__dirname, '..', '..', '{modules,shared}', '**', '*.orm-entity.{ts,js}')],
     migrations: [join(__dirname, 'migrations', '*.{ts,js}')],
     migrationsTableName: 'migrations',
     // Each migration runs in its own transaction so a failure leaves earlier ones applied.

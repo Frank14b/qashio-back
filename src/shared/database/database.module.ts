@@ -1,8 +1,13 @@
+import { ClsPluginTransactional } from '@nestjs-cls/transactional';
+import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { TypeOrmModule, getDataSourceToken } from '@nestjs/typeorm';
+import { ClsModule } from 'nestjs-cls';
 import { parseEnv } from '../config/env';
+import { ClsUnitOfWork } from './transaction-host';
 import { buildTypeOrmOptions } from './typeorm.config';
+import { UNIT_OF_WORK } from './unit-of-work.port';
 
 @Module({
   imports: [
@@ -23,6 +28,18 @@ import { buildTypeOrmOptions } from './typeorm.config';
         migrationsRun: false,
       }),
     }),
+    // Shares one transaction across repositories (AsyncLocalStorage), see UnitOfWorkPort.
+    ClsModule.forRoot({
+      global: true,
+      plugins: [
+        new ClsPluginTransactional({
+          imports: [TypeOrmModule],
+          adapter: new TransactionalAdapterTypeOrm({ dataSourceToken: getDataSourceToken() }),
+        }),
+      ],
+    }),
   ],
+  providers: [{ provide: UNIT_OF_WORK, useClass: ClsUnitOfWork }],
+  exports: [UNIT_OF_WORK],
 })
 export class DatabaseModule {}

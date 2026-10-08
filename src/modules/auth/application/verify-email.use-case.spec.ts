@@ -9,6 +9,7 @@ import {
 } from '@/test-utils/auth-fixtures';
 import { OtpPurpose } from '../domain/otp-purpose';
 import { VerifyEmailUseCase } from './verify-email.use-case';
+import { inlineUnitOfWork } from '@/test-utils/unit-of-work';
 
 describe('VerifyEmailUseCase', () => {
   const users = makeUserRepository();
@@ -24,6 +25,7 @@ describe('VerifyEmailUseCase', () => {
       sessions as never,
       tokens as never,
       otp as never,
+      inlineUnitOfWork,
     );
   });
 

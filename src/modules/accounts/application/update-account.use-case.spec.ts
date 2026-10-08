@@ -1,4 +1,5 @@
 import { UpdateAccountUseCase } from './update-account.use-case';
+import { inlineUnitOfWork } from '@/test-utils/unit-of-work';
 
 describe('UpdateAccountUseCase', () => {
   const accounts = {
@@ -17,6 +18,7 @@ describe('UpdateAccountUseCase', () => {
       accounts as never,
       currencies as never,
       { emit: jest.fn() } as never,
+      inlineUnitOfWork,
     );
   });
 

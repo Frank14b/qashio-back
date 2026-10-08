@@ -8,6 +8,7 @@ import {
 } from '@/test-utils/auth-fixtures';
 import { USER_ACTIVATED_EVENT } from '../domain/events/user-activated.event';
 import { VerifyEmailUseCase } from './verify-email.use-case';
+import { inlineUnitOfWork } from '@/test-utils/unit-of-work';
 
 describe('VerifyEmailUseCase user.activated event', () => {
   const users = makeUserRepository();
@@ -24,6 +25,7 @@ describe('VerifyEmailUseCase user.activated event', () => {
       sessions as never,
       tokens as never,
       otp as never,
+      inlineUnitOfWork,
       events as never,
     );
   });

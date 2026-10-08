@@ -16,9 +16,20 @@ export class TypeOrmNotificationRepository implements NotificationRepositoryPort
     private readonly notifications: Repository<NotificationOrmEntity>,
   ) {}
 
-  async create(input: CreateNotificationInput): Promise<Notification> {
-    const saved = await this.notifications.save(this.notifications.create(input));
-    return this.toDomain(saved);
+  async create(input: CreateNotificationInput): Promise<Notification | null> {
+    const result = await this.notifications
+      .createQueryBuilder()
+      .insert()
+      .values({ ...input, eventId: input.eventId ?? null })
+      // Conflict on UQ_notifications_event_id: this event was already handled.
+      .orIgnore()
+      .returning(['id'])
+      .execute();
+    const inserted = (result.raw as { id: string }[])[0];
+    if (!inserted) {
+      return null;
+    }
+    return this.toDomain(await this.notifications.findOneByOrFail({ id: inserted.id }));
   }
 
   async findRecent(

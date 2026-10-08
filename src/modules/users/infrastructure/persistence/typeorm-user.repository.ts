@@ -1,6 +1,7 @@
+import { InjectTransactionHost } from '@nestjs-cls/transactional';
 import { Injectable } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { TypeOrmTransactionHost } from '@/shared/database/transaction-host';
 import { User } from '../../domain/entities/user.entity';
 import {
   CreateUserInput,
@@ -10,10 +11,12 @@ import { UserOrmEntity } from './user.orm-entity';
 
 @Injectable()
 export class TypeOrmUserRepository implements UserRepositoryPort {
-  constructor(
-    @InjectRepository(UserOrmEntity)
-    private readonly users: Repository<UserOrmEntity>,
-  ) {}
+  constructor(@InjectTransactionHost() private readonly txHost: TypeOrmTransactionHost) {}
+
+  /** Joins the caller's UnitOfWork transaction when there is one. */
+  private get users(): Repository<UserOrmEntity> {
+    return this.txHost.tx.getRepository(UserOrmEntity);
+  }
 
   async findByEmail(email: string): Promise<User | null> {
     const row = await this.users.findOne({ where: { email: email.toLowerCase() } });

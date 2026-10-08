@@ -23,6 +23,8 @@ export type TransactionChange = {
   userId: string;
   before: TransactionSnapshot | null;
   after: TransactionSnapshot | null;
+  /** Id of the transaction event being handled; makes a retried evaluation alert once. */
+  sourceEventId?: string;
 };
 
 /**
@@ -85,7 +87,12 @@ export class EvaluateBudgetThresholdsUseCase {
         periodStart: current.periodStart.toISOString(),
         periodEnd: current.periodEnd.toISOString(),
       };
-      this.events.emit(BUDGET_THRESHOLD_REACHED_EVENT, payload);
+      // Same source event + budget + threshold = same alert, even if this job is retried.
+      const dedupeKey =
+        change.sourceEventId && `${change.sourceEventId}:${budget.id}:${threshold}`;
+      await (dedupeKey
+        ? this.events.emit(BUDGET_THRESHOLD_REACHED_EVENT, payload, { dedupeKey })
+        : this.events.emit(BUDGET_THRESHOLD_REACHED_EVENT, payload));
     }
   }
 

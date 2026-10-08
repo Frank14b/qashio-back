@@ -12,6 +12,7 @@ import {
 } from '@/test-utils/transaction-fixtures';
 import { TransactionRules } from './transaction-rules';
 import { UpdateTransactionUseCase } from './update-transaction.use-case';
+import { inlineUnitOfWork } from '@/test-utils/unit-of-work';
 
 describe('UpdateTransactionUseCase', () => {
   let deps: ReturnType<typeof makeRulesDeps>;
@@ -28,7 +29,12 @@ describe('UpdateTransactionUseCase', () => {
       deps.categories as never,
       deps.currencies as never,
     );
-    useCase = new UpdateTransactionUseCase(transactions as never, events as never, rules);
+    useCase = new UpdateTransactionUseCase(
+      transactions as never,
+      events as never,
+      rules,
+      inlineUnitOfWork,
+    );
 
     transactions.findByIdForUser.mockResolvedValue(makeTransaction());
     transactions.update.mockResolvedValue(makeTransaction({ amount: '60.0000' }));
