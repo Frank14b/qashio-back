@@ -1,12 +1,17 @@
-FROM node:22.8.0-alpine
+FROM node:22.14.0-alpine
 
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm ci
+RUN npm ci --ignore-scripts
+
+COPY docker-entrypoint.dev.sh /usr/local/bin/docker-entrypoint.dev.sh
+RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.dev.sh \
+  && chmod +x /usr/local/bin/docker-entrypoint.dev.sh
 
 COPY . .
 
 EXPOSE 3000
 
+ENTRYPOINT ["docker-entrypoint.dev.sh"]
 CMD ["npm", "run", "start:dev"]
