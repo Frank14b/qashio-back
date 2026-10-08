@@ -15,6 +15,7 @@ import {
   makeTransactionRepository,
 } from '@/test-utils/transaction-fixtures';
 import { TransactionRules } from './transaction-rules';
+import { inlineUnitOfWork } from '@/test-utils/unit-of-work';
 
 describe('CreateTransactionUseCase', () => {
   let deps: ReturnType<typeof makeRulesDeps>;
@@ -42,7 +43,12 @@ describe('CreateTransactionUseCase', () => {
       deps.categories as never,
       deps.currencies as never,
     );
-    useCase = new CreateTransactionUseCase(transactions as never, events as never, rules);
+    useCase = new CreateTransactionUseCase(
+      transactions as never,
+      events as never,
+      rules,
+      inlineUnitOfWork,
+    );
 
     deps.accounts.findByIdForUser.mockResolvedValue(makeAccount());
     deps.categories.findByIdForUser.mockResolvedValue(makeCategory());

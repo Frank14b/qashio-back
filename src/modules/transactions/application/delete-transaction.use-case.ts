@@ -1,4 +1,5 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { UNIT_OF_WORK, UnitOfWorkPort } from '@/shared/database/unit-of-work.port';
 import {
   DOMAIN_EVENT_PUBLISHER,
   DomainEventPublisherPort,
@@ -25,6 +26,7 @@ export class DeleteTransactionUseCase {
   constructor(
     @Inject(TRANSACTION_REPOSITORY) private readonly transactions: TransactionRepositoryPort,
     @Inject(DOMAIN_EVENT_PUBLISHER) private readonly events: DomainEventPublisherPort,
+    @Inject(UNIT_OF_WORK) private readonly unitOfWork: UnitOfWorkPort,
   ) {}
 
   async execute(command: DeleteTransactionCommand): Promise<TransactionSnapshot> {
@@ -36,11 +38,13 @@ export class DeleteTransactionUseCase {
       throw new NotFoundException('Transaction not found');
     }
 
-    await this.transactions.delete(existing.id);
-
     const snapshot = toTransactionSnapshot(existing);
-    const payload: TransactionDeletedPayload = { transaction: snapshot };
-    this.events.emit(TRANSACTION_DELETED_EVENT, payload);
+    // The delete and its transaction.deleted event commit together.
+    await this.unitOfWork.run(async () => {
+      await this.transactions.delete(existing.id);
+      const payload: TransactionDeletedPayload = { transaction: snapshot };
+      await this.events.emit(TRANSACTION_DELETED_EVENT, payload);
+    });
     return snapshot;
   }
 }

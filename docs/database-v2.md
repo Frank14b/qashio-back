@@ -8,6 +8,7 @@ This is the schema as it runs today, after the migrations below. It was generate
 | `1791353100000-AddTransactionsAndOpeningBalance` | transactions, `accounts.opening_balance` |
 | `1791450000000-AddBudgetsAndNotifications` | budgets, notifications |
 | `1791540000000-AddTransactionIdempotencyKey` | `transactions.idempotency_key` + per-user unique index |
+| `1791600000000-AddOutboxAndNotificationEventId` | `outbox_events` (transactional outbox), `notifications.event_id` (unique) |
 
 ---
 
@@ -21,7 +22,7 @@ This is the schema as it runs today, after the migrations below. It was generate
 | Budgets | "later" | Per **wallet + category + period**; currency is the wallet's; usage derived with `date_trunc` |
 | Notifications | — | In-app feed, filled by domain events; budget alerts are also emailed |
 | Duplicate protection | — | `idempotency_key` unique per user + a 2-minute soft duplicate check |
-| Events | In-process `EventEmitter` | **BullMQ** queue in Redis: one job per handler, 5 attempts, survives restarts |
+| Events | In-process `EventEmitter` | **Transactional outbox** (`outbox_events`, same DB transaction as the write) relayed to a **BullMQ** queue: one job per handler, 5 attempts, no loss on a crash or Redis outage |
 | Redis | OTPs | OTPs + attempt counters, refresh-rotation locks, rate-limit counters, event queue |
 
 ---
@@ -35,7 +36,8 @@ flowchart LR
   end
   subgraph API["NestJS API (one process)"]
     HTTP[HTTP controllers<br/>+ use cases]
-    PUB[DomainEventPublisher]
+    PUB[DomainEventPublisher<br/>writes outbox row]
+    REL[OutboxRelay<br/>polls every 1 s]
     WRK[domain-events worker<br/>@OnDomainEvent handlers]
   end
   PG[(Postgres<br/>source of truth)]
@@ -47,7 +49,9 @@ flowchart LR
   HTTP --> PG
   HTTP -- "OTPs, refresh locks,<br/>rate limits" --> RD
   HTTP --> PUB
-  PUB -- "addBulk: 1 job / handler" --> RD
+  PUB -- "same DB transaction<br/>as the write" --> PG
+  PG -- "pending outbox rows" --> REL
+  REL -- "addBulk: 1 job / handler" --> RD
   RD -- "jobs (retries, backoff)" --> WRK
   WRK --> PG
   WRK -- "budget alerts" --> SMTP
@@ -160,8 +164,17 @@ erDiagram
     varchar_160 title
     text message
     jsonb data
+    uuid event_id "UK when set: one per source event"
     timestamptz read_at
     timestamptz created_at
+  }
+  outbox_events {
+    uuid id PK "also the event id"
+    varchar_80 event
+    jsonb payload
+    varchar_200 dedupe_key "UK when set"
+    timestamptz created_at
+    timestamptz published_at "NULL = pending"
   }
 ```
 
@@ -196,7 +209,11 @@ One spending limit per **wallet + category + period**, enforced by `UQ_budgets_s
 
 ### `notifications`
 
-In-app feed. `type` is the source event (`transaction.created`, `budget.threshold_reached`, …) and `data` holds ids or amounts for the UI. Indexes: `(user_id, created_at)` for the feed, and a partial `(user_id) WHERE read_at IS NULL` for the unread badge.
+In-app feed. `type` is the source event (`transaction.created`, `budget.threshold_reached`, …) and `data` holds ids or amounts for the UI. `event_id` is the outbox id of that event; its partial unique index means a redelivered event can't create a second notification (or send a second alert email). Indexes: `(user_id, created_at)` for the feed, and a partial `(user_id) WHERE read_at IS NULL` for the unread badge.
+
+### `outbox_events`
+
+Transactional outbox. Each domain event is inserted in the **same DB transaction** as the change that raised it, so it exists if and only if that change committed. `OutboxRelay` reads rows with `published_at IS NULL` (partial index `IDX_outbox_events_pending`), enqueues them on BullMQ and sets `published_at`. `id` is the event id handlers receive, and it is part of every job id. `dedupe_key` (partial unique) lets an emitter that may run twice, such as a retried budget check, record an event once. Published rows are deleted after 7 days.
 
 ### `accounts` (wallets)
 
@@ -245,6 +262,8 @@ Storing either value would mean keeping a cached copy correct across every creat
 | One budget per wallet + category + period | `UQ_budgets_scope` |
 | A create retried with the same key never inserts twice | Partial unique `(user_id, idempotency_key)` |
 | Transaction references are unique | `UQ_transactions_reference` |
+| A domain event exists only if its write committed | Outbox row inserted in the same transaction |
+| A redelivered event creates one notification | Partial unique `notifications.event_id` |
 | Category name is unique per user | `UQ_categories_user_name` |
 | Money precision | `numeric(19,4)`; the API rejects input with more decimals than the wallet's currency |
 
@@ -266,7 +285,7 @@ Postgres holds everything durable. Redis holds short-lived or coordination state
 | `refresh:lock:{tokenHash}` | `SET NX PX 5000` | One rotation per refresh token at a time |
 | `refresh:result:{tokenHash}` | string, 30 s | Replays the rotated pair to concurrent / late callers that used the same token |
 | throttler keys | counters, 60 s | `@nestjs/throttler` (global, strict auth 5/min, refresh 30/min) |
-| `bull:domain-events:*` | BullMQ | Waiting, delayed (backoff), completed (24 h) and failed (7 days) event jobs |
+| `bull:domain-events:*` | BullMQ | Waiting, delayed (backoff), completed (24 h) and failed (7 days) event jobs. Job id `{eventId}.{handler}` |
 
 ---
 
@@ -300,25 +319,26 @@ sequenceDiagram
       U->>FE: Save anyway
       FE->>API: POST again: same key, confirmDuplicate: true
     end
-    API->>DB: INSERT (unique user_id + key)
+    API->>DB: One DB transaction: INSERT transaction (unique user_id + key) + outbox row
     alt concurrent request with the same key won
       DB-->>API: unique violation
       API->>DB: SELECT winner
       API-->>FE: 201 winner (Idempotent-Replayed: true)
     else inserted
-      API->>Q: transaction.created → 1 job per handler
       API-->>FE: 201 transaction
+      Note over DB,Q: OutboxRelay (within ~1 s): pending row → 1 job per handler
     end
   end
 ```
 
-### 2. Domain events through BullMQ
+### 2. Domain events: outbox → BullMQ
 
 ```mermaid
 flowchart TD
-  UC[Use case commits a write] -->|emit event, payload| PUB[BullMqDomainEventPublisher]
-  PUB -->|handlersFor event| REG[(Handler registry<br/>found at boot via DiscoveryService)]
-  PUB -->|addBulk| Q[(Redis: domain-events queue)]
+  UC[Use case: write + emit<br/>in one DB transaction] -->|INSERT outbox_events| OB[(Postgres: outbox_events<br/>published_at NULL)]
+  OB -->|"every 1 s: FOR UPDATE SKIP LOCKED"| REL[OutboxRelay]
+  REL -->|handlersFor event| REG[(Handler registry<br/>found at boot via DiscoveryService)]
+  REL -->|"addBulk, jobId = eventId.handler<br/>then set published_at"| Q[(Redis: domain-events queue)]
   Q --> J1[job: budgets<br/>TransactionEventsListener.onCreated]
   Q --> J2[job: notifications<br/>DomainEventsListener.onTransactionCreated]
   J1 --> RUN{handler throws?}
@@ -329,9 +349,10 @@ flowchart TD
 ```
 
 - Each handler is its own job, so a failing notification never re-runs the budget check for the same event.
-- Jobs are stored in Redis. If the API stops mid-retry, the next instance picks them up. (Verified: notifications were delivered exactly once after a kill and restart during backoff.)
-- Handlers rethrow so that retries happen, and they are safe to run twice: default wallets and categories only insert what's missing, and a failed notification insert writes nothing.
-- **Remaining gap:** the event is enqueued right after the DB commit, not in the same transaction. A crash or Redis outage in that window loses the event, and the error is logged. A transactional outbox table would close it if that guarantee is ever needed.
+- **No lost events:** the outbox row commits with the write. If the API dies or Redis is down before relaying, the row stays pending and is relayed on the next pass or after a restart. If the API stops mid-retry, the jobs are still in Redis and the next instance continues them. (Both verified with the API killed: each notification was delivered exactly once.)
+- **No duplicates:** a row relayed twice yields the same job ids, which BullMQ ignores. A job that runs twice (a BullMQ retry or stalled-job recovery) is absorbed by the handlers: notifications are unique per `event_id`, budget alerts use a dedupe key, and default wallets and categories only insert what's missing.
+- Handlers rethrow so that retries happen.
+- **Delivery latency:** up to ~1 s (the relay poll interval).
 
 | Event | Emitted by | Handlers |
 |-------|-----------|----------|

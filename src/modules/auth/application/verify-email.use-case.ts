@@ -9,6 +9,7 @@ import {
   USER_REPOSITORY,
   UserRepositoryPort,
 } from '@/modules/users/domain/ports/user.repository.port';
+import { UNIT_OF_WORK, UnitOfWorkPort } from '@/shared/database/unit-of-work.port';
 import {
   DOMAIN_EVENT_PUBLISHER,
   DomainEventPublisherPort,
@@ -38,6 +39,7 @@ export class VerifyEmailUseCase {
     @Inject(AUTH_SESSION_REPOSITORY) private readonly sessions: AuthSessionRepositoryPort,
     @Inject(TOKEN_SERVICE) private readonly tokens: TokenServicePort,
     @Inject(OTP_SERVICE) private readonly otp: OtpPort,
+    @Inject(UNIT_OF_WORK) private readonly unitOfWork: UnitOfWorkPort,
     @Optional()
     @Inject(DOMAIN_EVENT_PUBLISHER)
     private readonly events?: DomainEventPublisherPort,
@@ -59,18 +61,23 @@ export class VerifyEmailUseCase {
       throw new UnauthorizedException('Invalid or expired OTP');
     }
 
-    const activated = await this.users.activate(user.id);
-
-    const payload: UserActivatedPayload = { userId: activated.id };
-    this.events?.emit(USER_ACTIVATED_EVENT, payload);
-
     const refreshToken = this.tokens.generateRefreshToken();
-    const session = await this.sessions.create({
-      userId: activated.id,
-      refreshTokenHash: this.tokens.hashRefreshToken(refreshToken),
-      userAgent: command.userAgent,
-      ipAddress: command.ipAddress,
-      expiresAt: this.tokens.getRefreshExpiresAt(),
+    // Activation, its user.activated event (default wallets / categories) and
+    // the first session commit together.
+    const { activated, session } = await this.unitOfWork.run(async () => {
+      const activated = await this.users.activate(user.id);
+
+      const payload: UserActivatedPayload = { userId: activated.id };
+      await this.events?.emit(USER_ACTIVATED_EVENT, payload);
+
+      const session = await this.sessions.create({
+        userId: activated.id,
+        refreshTokenHash: this.tokens.hashRefreshToken(refreshToken),
+        userAgent: command.userAgent,
+        ipAddress: command.ipAddress,
+        expiresAt: this.tokens.getRefreshExpiresAt(),
+      });
+      return { activated, session };
     });
 
     const accessToken = await this.tokens.signAccessToken({

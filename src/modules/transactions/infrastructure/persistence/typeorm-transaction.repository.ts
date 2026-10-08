@@ -1,6 +1,7 @@
+import { InjectTransactionHost } from '@nestjs-cls/transactional';
 import { Injectable } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
 import { QueryFailedError, Repository, SelectQueryBuilder } from 'typeorm';
+import { TypeOrmTransactionHost } from '@/shared/database/transaction-host';
 import { CategoryKind } from '@/modules/categories/domain/category-kind';
 import { Transaction } from '../../domain/entities/transaction.entity';
 import {
@@ -35,10 +36,12 @@ const SORT_COLUMNS: Record<TransactionSortField, string> = {
 
 @Injectable()
 export class TypeOrmTransactionRepository implements TransactionRepositoryPort {
-  constructor(
-    @InjectRepository(TransactionOrmEntity)
-    private readonly transactions: Repository<TransactionOrmEntity>,
-  ) {}
+  constructor(@InjectTransactionHost() private readonly txHost: TypeOrmTransactionHost) {}
+
+  /** Joins the caller's UnitOfWork transaction when there is one. */
+  private get transactions(): Repository<TransactionOrmEntity> {
+    return this.txHost.tx.getRepository(TransactionOrmEntity);
+  }
 
   async create(input: CreateTransactionInput): Promise<Transaction> {
     let id: string;

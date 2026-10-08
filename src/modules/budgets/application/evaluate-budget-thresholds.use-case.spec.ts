@@ -65,6 +65,22 @@ describe('EvaluateBudgetThresholdsUseCase', () => {
     );
   });
 
+  it('keys the alert on the source event so a retried evaluation records it once', async () => {
+    givenUsage('420');
+    await useCase.execute({
+      userId: 'user-1',
+      before: null,
+      after: expense(),
+      sourceEventId: 'evt-1',
+    });
+
+    expect(events.emit).toHaveBeenCalledWith(
+      BUDGET_THRESHOLD_REACHED_EVENT,
+      expect.objectContaining({ threshold: 80 }),
+      { dedupeKey: 'evt-1:budget-1:80' },
+    );
+  });
+
   it('alerts only the highest threshold when one expense crosses both', async () => {
     givenUsage('510'); // 300 → 510 with a 210 expense
     await useCase.execute({ userId: 'user-1', before: null, after: expense({ amount: '210' }) });

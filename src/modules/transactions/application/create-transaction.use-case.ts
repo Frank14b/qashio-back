@@ -5,6 +5,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import Decimal from 'decimal.js';
+import { UNIT_OF_WORK, UnitOfWorkPort } from '@/shared/database/unit-of-work.port';
 import {
   DOMAIN_EVENT_PUBLISHER,
   DomainEventPublisherPort,
@@ -62,6 +63,7 @@ export class CreateTransactionUseCase {
     @Inject(TRANSACTION_REPOSITORY) private readonly transactions: TransactionRepositoryPort,
     @Inject(DOMAIN_EVENT_PUBLISHER) private readonly events: DomainEventPublisherPort,
     private readonly rules: TransactionRules,
+    @Inject(UNIT_OF_WORK) private readonly unitOfWork: UnitOfWorkPort,
   ) {}
 
   async execute(command: CreateTransactionCommand): Promise<CreateTransactionResult> {
@@ -96,7 +98,7 @@ export class CreateTransactionUseCase {
 
     let transaction: Transaction;
     try {
-      transaction = await this.insertWithUniqueReference({
+      transaction = await this.recordWithUniqueReference({
         idempotencyKey: command.idempotencyKey,
         userId: command.userId,
         accountId: account.id,
@@ -123,10 +125,6 @@ export class CreateTransactionUseCase {
       return this.replay(winner, command);
     }
 
-    const payload: TransactionCreatedPayload = {
-      transaction: toTransactionSnapshot(transaction),
-    };
-    this.events.emit(TRANSACTION_CREATED_EVENT, payload);
     return { transaction, replayed: false };
   }
 
@@ -179,15 +177,27 @@ export class CreateTransactionUseCase {
     });
   }
 
-  /** The DB unique constraint is the source of truth; regenerate on the rare collision. */
-  private async insertWithUniqueReference(
+  /**
+   * Inserts the row and its transaction.created outbox event in one DB
+   * transaction. The unique reference is enforced by the DB; on the rare
+   * collision the whole unit is retried with a new reference (a failed
+   * statement aborts its Postgres transaction, so retrying inside it is impossible).
+   */
+  private async recordWithUniqueReference(
     input: Omit<Parameters<TransactionRepositoryPort['create']>[0], 'reference'>,
   ): Promise<Transaction> {
     for (let attempt = 1; ; attempt += 1) {
       try {
-        return await this.transactions.create({
-          ...input,
-          reference: generateTransactionReference(),
+        return await this.unitOfWork.run(async () => {
+          const transaction = await this.transactions.create({
+            ...input,
+            reference: generateTransactionReference(),
+          });
+          const payload: TransactionCreatedPayload = {
+            transaction: toTransactionSnapshot(transaction),
+          };
+          await this.events.emit(TRANSACTION_CREATED_EVENT, payload);
+          return transaction;
         });
       } catch (error) {
         if (!(error instanceof DuplicateTransactionReferenceError) || attempt >= MAX_REFERENCE_ATTEMPTS) {

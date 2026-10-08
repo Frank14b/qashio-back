@@ -2,21 +2,26 @@ import { BullModule } from '@nestjs/bullmq';
 import { Global, Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DiscoveryModule } from '@nestjs/core';
+import { TypeOrmModule } from '@nestjs/typeorm';
 import Redis from 'ioredis';
-import { BullMqDomainEventPublisher } from './bullmq-domain-event.publisher';
 import { DomainEventHandlersRegistry } from './domain-event-handlers.registry';
 import { DOMAIN_EVENT_PUBLISHER } from './domain-event-publisher.port';
 import { DomainEventsProcessor } from './domain-events.processor';
 import { DOMAIN_EVENT_JOB_OPTIONS, DOMAIN_EVENTS_QUEUE } from './domain-events.queue';
+import { OutboxDomainEventPublisher } from './outbox/outbox-domain-event.publisher';
+import { OutboxEventOrmEntity } from './outbox/outbox-event.orm-entity';
+import { OutboxRelay } from './outbox/outbox-relay';
 
 /**
- * Domain events go through a BullMQ queue in Redis: `@OnDomainEvent` handlers
- * run in a worker (in this process), each as its own job with retries.
+ * Domain events: use cases write them to the outbox table in their own DB
+ * transaction; OutboxRelay moves committed rows to the BullMQ queue; the
+ * worker runs each `@OnDomainEvent` handler as its own job with retries.
  */
 @Global()
 @Module({
   imports: [
     DiscoveryModule,
+    TypeOrmModule.forFeature([OutboxEventOrmEntity]),
     BullModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => {
@@ -42,9 +47,10 @@ import { DOMAIN_EVENT_JOB_OPTIONS, DOMAIN_EVENTS_QUEUE } from './domain-events.q
   providers: [
     DomainEventHandlersRegistry,
     DomainEventsProcessor,
+    OutboxRelay,
     {
       provide: DOMAIN_EVENT_PUBLISHER,
-      useClass: BullMqDomainEventPublisher,
+      useClass: OutboxDomainEventPublisher,
     },
   ],
   exports: [DOMAIN_EVENT_PUBLISHER],

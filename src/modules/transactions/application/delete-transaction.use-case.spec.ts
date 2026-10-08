@@ -6,11 +6,16 @@ import {
   makeTransaction,
   makeTransactionRepository,
 } from '@/test-utils/transaction-fixtures';
+import { inlineUnitOfWork } from '@/test-utils/unit-of-work';
 
 describe('DeleteTransactionUseCase', () => {
   const transactions = makeTransactionRepository();
   const events = makeEventPublisher();
-  const useCase = new DeleteTransactionUseCase(transactions as never, events as never);
+  const useCase = new DeleteTransactionUseCase(
+    transactions as never,
+    events as never,
+    inlineUnitOfWork,
+  );
 
   beforeEach(() => {
     jest.clearAllMocks();

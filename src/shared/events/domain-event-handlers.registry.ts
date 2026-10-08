@@ -1,12 +1,12 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { DiscoveryService, MetadataScanner } from '@nestjs/core';
-import { OnDomainEvent } from './on-domain-event.decorator';
+import { DomainEventContext, OnDomainEvent } from './on-domain-event.decorator';
 
 type DomainEventHandler = {
   /** Stable id stored in the job, e.g. `TransactionEventsListener.onCreated`. */
   id: string;
   event: string;
-  invoke: (payload: unknown) => Promise<unknown>;
+  invoke: (payload: unknown, context: DomainEventContext) => Promise<unknown>;
 };
 
 /** Every `@OnDomainEvent` method in the app, found once at startup. */
@@ -35,11 +35,13 @@ export class DomainEventHandlersRegistry implements OnModuleInit {
         if (this.byId.has(id)) {
           throw new Error(`Duplicate domain event handler id: ${id}`);
         }
-        const handler = (instance as Record<string, (payload: unknown) => unknown>)[method];
+        const handler = (
+          instance as Record<string, (payload: unknown, context: DomainEventContext) => unknown>
+        )[method];
         this.byId.set(id, {
           id,
           event,
-          invoke: async (payload) => handler.call(instance, payload),
+          invoke: async (payload, context) => handler.call(instance, payload, context),
         });
       }
     }

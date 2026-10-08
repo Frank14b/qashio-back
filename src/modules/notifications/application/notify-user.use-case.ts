@@ -29,8 +29,9 @@ export class NotifyUserUseCase {
   ) {}
 
   async execute({ email, ...notification }: NotificationDraft): Promise<void> {
-    await this.notifications.create(notification);
-    if (!email) {
+    const created = await this.notifications.create(notification);
+    // null: a replay of an event already notified (and emailed, if it was an alert).
+    if (created === null || !email) {
       return;
     }
 

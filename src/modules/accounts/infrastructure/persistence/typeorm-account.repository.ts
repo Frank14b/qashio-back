@@ -1,6 +1,7 @@
+import { InjectTransactionHost } from '@nestjs-cls/transactional';
 import { Injectable } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
+import { TypeOrmTransactionHost } from '@/shared/database/transaction-host';
 import { Account } from '../../domain/entities/account.entity';
 import {
   AccountRepositoryPort,
@@ -12,10 +13,12 @@ import { AccountOrmEntity } from './account.orm-entity';
 
 @Injectable()
 export class TypeOrmAccountRepository implements AccountRepositoryPort {
-  constructor(
-    @InjectRepository(AccountOrmEntity)
-    private readonly accounts: Repository<AccountOrmEntity>,
-  ) {}
+  constructor(@InjectTransactionHost() private readonly txHost: TypeOrmTransactionHost) {}
+
+  /** Joins the caller's UnitOfWork transaction when there is one. */
+  private get accounts(): Repository<AccountOrmEntity> {
+    return this.txHost.tx.getRepository(AccountOrmEntity);
+  }
 
   async create(input: CreateAccountInput): Promise<Account> {
     const row = this.accounts.create({

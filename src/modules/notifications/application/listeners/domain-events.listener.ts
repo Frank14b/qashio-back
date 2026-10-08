@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { OnDomainEvent } from '@/shared/events/on-domain-event.decorator';
+import { DomainEventContext, OnDomainEvent } from '@/shared/events/on-domain-event.decorator';
 import {
   ACCOUNT_CREATED_EVENT,
   ACCOUNT_UPDATED_EVENT,
@@ -27,37 +27,38 @@ export class DomainEventsListener {
   constructor(private readonly notifyUser: NotifyUserUseCase) {}
 
   @OnDomainEvent(TRANSACTION_CREATED_EVENT)
-  onTransactionCreated({ transaction }: TransactionCreatedPayload) {
-    return this.notify(content.transactionCreated(transaction));
+  onTransactionCreated({ transaction }: TransactionCreatedPayload, context: DomainEventContext) {
+    return this.notify(content.transactionCreated(transaction), context);
   }
 
   @OnDomainEvent(TRANSACTION_UPDATED_EVENT)
-  onTransactionUpdated({ current }: TransactionUpdatedPayload) {
-    return this.notify(content.transactionUpdated(current));
+  onTransactionUpdated({ current }: TransactionUpdatedPayload, context: DomainEventContext) {
+    return this.notify(content.transactionUpdated(current), context);
   }
 
   @OnDomainEvent(TRANSACTION_DELETED_EVENT)
-  onTransactionDeleted({ transaction }: TransactionDeletedPayload) {
-    return this.notify(content.transactionDeleted(transaction));
+  onTransactionDeleted({ transaction }: TransactionDeletedPayload, context: DomainEventContext) {
+    return this.notify(content.transactionDeleted(transaction), context);
   }
 
   @OnDomainEvent(BUDGET_THRESHOLD_REACHED_EVENT)
-  onBudgetThresholdReached(payload: BudgetThresholdReachedPayload) {
-    return this.notify(content.budgetThresholdReached(payload));
+  onBudgetThresholdReached(payload: BudgetThresholdReachedPayload, context: DomainEventContext) {
+    return this.notify(content.budgetThresholdReached(payload), context);
   }
 
   @OnDomainEvent(ACCOUNT_CREATED_EVENT)
-  onAccountCreated(payload: AccountCreatedPayload) {
-    return this.notify(content.accountCreated(payload));
+  onAccountCreated(payload: AccountCreatedPayload, context: DomainEventContext) {
+    return this.notify(content.accountCreated(payload), context);
   }
 
   @OnDomainEvent(ACCOUNT_UPDATED_EVENT)
-  onAccountUpdated(payload: AccountUpdatedPayload) {
-    return this.notify(content.accountUpdated(payload));
+  onAccountUpdated(payload: AccountUpdatedPayload, context: DomainEventContext) {
+    return this.notify(content.accountUpdated(payload), context);
   }
 
   // Errors propagate so the queue retries the job (the source write is already committed).
-  private async notify(draft: NotificationDraft): Promise<void> {
-    await this.notifyUser.execute(draft);
+  // The event id makes a redelivered event store (and email) at most once.
+  private async notify(draft: NotificationDraft, { eventId }: DomainEventContext): Promise<void> {
+    await this.notifyUser.execute({ ...draft, eventId });
   }
 }

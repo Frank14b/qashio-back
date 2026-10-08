@@ -3,6 +3,7 @@ import {
   CURRENCY_REPOSITORY,
   CurrencyRepositoryPort,
 } from '@/modules/currencies/domain/ports/currency.repository.port';
+import { UNIT_OF_WORK, UnitOfWorkPort } from '@/shared/database/unit-of-work.port';
 import {
   DOMAIN_EVENT_PUBLISHER,
   DomainEventPublisherPort,
@@ -32,6 +33,7 @@ export class CreateAccountUseCase {
     @Inject(ACCOUNT_REPOSITORY) private readonly accounts: AccountRepositoryPort,
     @Inject(CURRENCY_REPOSITORY) private readonly currencies: CurrencyRepositoryPort,
     @Inject(DOMAIN_EVENT_PUBLISHER) private readonly events: DomainEventPublisherPort,
+    @Inject(UNIT_OF_WORK) private readonly unitOfWork: UnitOfWorkPort,
   ) {}
 
   /** Rejecting a blank name is CreateAccountRequestDto's job; here we only canonicalize. */
@@ -57,26 +59,29 @@ export class CreateAccountUseCase {
     const activeCount = await this.accounts.countActiveForUser(command.userId);
     const isDefault = command.isDefault === true || activeCount === 0;
 
-    if (isDefault) {
-      await this.accounts.clearDefaultForUser(command.userId);
-    }
+    // Default switch, insert and account.created event commit together.
+    return this.unitOfWork.run(async () => {
+      if (isDefault) {
+        await this.accounts.clearDefaultForUser(command.userId);
+      }
 
-    const account = await this.accounts.create({
-      userId: command.userId,
-      name,
-      currencyCode,
-      isDefault,
-      openingBalance,
+      const account = await this.accounts.create({
+        userId: command.userId,
+        name,
+        currencyCode,
+        isDefault,
+        openingBalance,
+      });
+
+      const payload: AccountCreatedPayload = {
+        accountId: account.id,
+        userId: account.userId,
+        name: account.name,
+        currencyCode: account.currencyCode,
+        openingBalance: account.openingBalance,
+      };
+      await this.events.emit(ACCOUNT_CREATED_EVENT, payload);
+      return account;
     });
-
-    const payload: AccountCreatedPayload = {
-      accountId: account.id,
-      userId: account.userId,
-      name: account.name,
-      currencyCode: account.currencyCode,
-      openingBalance: account.openingBalance,
-    };
-    this.events.emit(ACCOUNT_CREATED_EVENT, payload);
-    return account;
   }
 }

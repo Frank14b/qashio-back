@@ -97,7 +97,14 @@ API on [http://localhost:3000](http://localhost:3000), Swagger at [http://localh
 docker compose up -d --build --wait qashio-api
 ```
 
-The entrypoint applies pending migrations before starting (`RUN_MIGRATIONS=false` to skip). Postgres has a healthcheck, and `--wait` blocks until `/health` is green.
+Compose reads its settings from env files, and every value has a local default:
+
+- `./.env` (from the root `.env.example`): Postgres and pgAdmin credentials, `RUN_MIGRATIONS`, host ports.
+- `./qashio-api/.env`: the API settings above. Inside the compose network, `DATABASE_URL`, `REDIS_HOST/PORT` and `SMTP_HOST/PORT` are overridden to reach the `postgres`, `redis` and `mailpit` containers.
+
+The entrypoint applies pending migrations before starting (`RUN_MIGRATIONS=false` to skip). Postgres has a healthcheck, and `--wait` blocks until `/health` is green. Mailpit catches every email the API sends (OTP codes, budget alerts) at [http://localhost:8025](http://localhost:8025).
+
+To run the API on the host instead, start only the infrastructure: `docker compose up -d postgres redis mailpit`, then `npm run start:dev` with the default `.env`.
 
 ---
 
@@ -180,9 +187,13 @@ A budget alert fires when a transaction change **crosses** 80% or 100% of a budg
 
 ---
 
-## Domain events (BullMQ)
+## Domain events (transactional outbox + BullMQ)
 
-Use cases emit events through `DOMAIN_EVENT_PUBLISHER` after a successful write. The publisher looks up every `@OnDomainEvent(EVENT)` handler (found at boot with Nest's `DiscoveryService`) and enqueues **one job per handler** on the Redis `domain-events` queue. A worker in the same process runs them.
+An event can't be lost between the database and Redis:
+
+1. **Record:** a use case runs its write and `events.emit(...)` inside one `UNIT_OF_WORK` transaction (`nestjs-cls` shares it across repositories). `emit` only inserts a row into `outbox_events`, so the event commits or rolls back with the write.
+2. **Relay:** `OutboxRelay` polls every second. It locks pending rows with `FOR UPDATE SKIP LOCKED` (safe with several API instances), enqueues **one BullMQ job per `@OnDomainEvent` handler**, and marks the rows published in the same transaction. If Redis is down, the rows stay pending and the next pass retries.
+3. **Handle:** a worker in the same process runs each job. Handlers are the `@OnDomainEvent(EVENT)` methods found at boot with Nest's `DiscoveryService`.
 
 | Event | Handlers |
 |-------|----------|
@@ -192,10 +203,12 @@ Use cases emit events through `DOMAIN_EVENT_PUBLISHER` after a successful write.
 | `budget.threshold_reached` | notifications (in-app + email) |
 
 - **Retries:** 5 attempts per handler job, with exponential backoff (2s, 4s, 8s, 16s). A failing handler doesn't re-run the others for the same event.
-- **Durability:** jobs live in Redis, so they survive an API restart. Completed jobs are kept 24 h. Jobs that fail all 5 attempts are kept 7 days and logged at error level, which also reports them to Sentry.
-- **Handler rules:** throw on failure (never catch-and-log, because that disables retries), be safe to run twice, and keep payloads JSON-safe. Listener class names must be unique, because the handler id is `ClassName.method`.
+- **Durability:** a committed event stays in Postgres until relayed, and its jobs stay in Redis until handled, so neither an API crash nor a Redis outage loses it. Completed jobs are kept 24 h. Jobs that fail all 5 attempts are kept 7 days and logged at error level, which also reports them to Sentry. Published outbox rows are deleted after 7 days.
+- **No duplicates on replay:** job ids are `{eventId}.{handler}`, so relaying a row twice (crash after enqueue, before marking it published) is ignored by BullMQ. Handlers also receive `{ eventId }`: notifications are unique per event (`notifications.event_id`), so a redelivered event is stored and emailed once; budget alerts carry a dedupe key, so a retried budget check records one alert.
+- **Handler rules:** throw on failure (never catch-and-log, because that disables retries), be safe to run twice (use `context.eventId`), and keep payloads JSON-safe. Listener class names must be unique, because the handler id is `ClassName.method`.
+- **Emitter rule:** `await events.emit(...)` inside the same `unitOfWork.run(...)` as the write it describes.
 - **Redis for production:** BullMQ needs `maxmemory-policy noeviction`. Enable AOF (`appendonly yes`) so queued jobs survive a Redis restart; the root `docker-compose.yml` does both.
-- **Known gap:** the job is enqueued right after the DB commit, not inside the transaction. A crash in that window loses the event (it is logged). A transactional outbox would close it if needed.
+- **One Redis per environment:** every API process that shares a Redis also shares the `domain-events` queue, and runs the other processes' jobs against its own database. Give each environment its own Redis, or its own Redis DB number (`REDIS_URL=redis://host:6379/<n>`).
 
 ---
 

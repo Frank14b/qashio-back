@@ -1,6 +1,7 @@
+import { InjectTransactionHost } from '@nestjs-cls/transactional';
 import { Injectable } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { TypeOrmTransactionHost } from '@/shared/database/transaction-host';
 import { AuthSession } from '../../domain/entities/auth-session.entity';
 import {
   AuthSessionRepositoryPort,
@@ -10,10 +11,12 @@ import { AuthSessionOrmEntity } from './auth-session.orm-entity';
 
 @Injectable()
 export class TypeOrmAuthSessionRepository implements AuthSessionRepositoryPort {
-  constructor(
-    @InjectRepository(AuthSessionOrmEntity)
-    private readonly sessions: Repository<AuthSessionOrmEntity>,
-  ) {}
+  constructor(@InjectTransactionHost() private readonly txHost: TypeOrmTransactionHost) {}
+
+  /** Joins the caller's UnitOfWork transaction when there is one. */
+  private get sessions(): Repository<AuthSessionOrmEntity> {
+    return this.txHost.tx.getRepository(AuthSessionOrmEntity);
+  }
 
   async create(input: CreateAuthSessionInput): Promise<AuthSession> {
     const row = this.sessions.create({

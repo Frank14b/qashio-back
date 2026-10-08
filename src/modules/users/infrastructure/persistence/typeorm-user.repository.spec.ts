@@ -27,7 +27,7 @@ describe('TypeOrmUserRepository', () => {
       create: jest.fn(),
       save: jest.fn(),
     };
-    repo = new TypeOrmUserRepository(orm as unknown as Repository<UserOrmEntity>);
+    repo = new TypeOrmUserRepository({ tx: { getRepository: () => orm } } as never);
   });
 
   it('findByEmail lowercases the lookup and maps to domain', async () => {

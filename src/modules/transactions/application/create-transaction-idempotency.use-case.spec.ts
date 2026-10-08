@@ -11,6 +11,7 @@ import { DuplicateIdempotencyKeyError } from '../domain/ports/transaction.reposi
 import { TransactionType } from '../domain/transaction-type';
 import { CreateTransactionUseCase, POSSIBLE_DUPLICATE_CODE } from './create-transaction.use-case';
 import { TransactionRules } from './transaction-rules';
+import { inlineUnitOfWork } from '@/test-utils/unit-of-work';
 
 describe('CreateTransactionUseCase — duplicate protection', () => {
   let deps: ReturnType<typeof makeRulesDeps>;
@@ -37,7 +38,12 @@ describe('CreateTransactionUseCase — duplicate protection', () => {
       deps.categories as never,
       deps.currencies as never,
     );
-    useCase = new CreateTransactionUseCase(transactions as never, events as never, rules);
+    useCase = new CreateTransactionUseCase(
+      transactions as never,
+      events as never,
+      rules,
+      inlineUnitOfWork,
+    );
 
     deps.accounts.findByIdForUser.mockResolvedValue(makeAccount());
     deps.categories.findByIdForUser.mockResolvedValue(makeCategory());

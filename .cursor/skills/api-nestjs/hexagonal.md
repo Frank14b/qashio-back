@@ -56,10 +56,14 @@ Name application classes `*UseCase` (`*.use-case.ts`). Keep `*Service` for infra
 
 ## Events
 
-- Emit from **application** after a successful write (e.g. `transaction.created`) through `DOMAIN_EVENT_PUBLISHER` — never inject `Queue`/`EventEmitter2` into use cases.
-- The publisher (`src/shared/events`) enqueues **one BullMQ job per handler** on the `domain-events` queue: 5 attempts, exponential backoff, failed jobs kept 7 days. Jobs live in Redis, so they survive an API restart.
+- Emit from **application** through `DOMAIN_EVENT_PUBLISHER` — never inject `Queue`/`EventEmitter2` into use cases.
+- **Transactional outbox:** `await this.events.emit(...)` inside the same `this.unitOfWork.run(...)` (`UNIT_OF_WORK` port) as the write it describes. `emit` only inserts an `outbox_events` row, so the event commits or rolls back with the write. Never emit outside the unit of work of a write, and never call Redis/BullMQ directly for events.
+- Repositories that take part in a unit of work read their TypeORM repository from the transaction host (`@InjectTransactionHost()` + `this.txHost.tx.getRepository(Entity)`), not `@InjectRepository`.
+- A failed statement aborts its Postgres transaction: retry loops (e.g. on a unique-violation collision) must wrap the whole `unitOfWork.run`, not run inside it.
+- `OutboxRelay` moves committed rows to the `domain-events` BullMQ queue, **one job per handler** (job id `{eventId}.{handler}`, so re-relaying is a no-op): 5 attempts, exponential backoff, failed jobs kept 7 days.
+- Unit tests pass `inlineUnitOfWork` (`src/test-utils/unit-of-work.ts`) for the `UNIT_OF_WORK` constructor argument.
 - Handlers are provider methods decorated with `@OnDomainEvent(EVENT)` (in `application/listeners`, registered in the module). Handler id = `ClassName.method`, so listener class names must be unique across modules.
-- Handlers must **throw on failure** (no try/catch-and-log: that silently disables retries) and be **safe to run twice** (a retry can follow a partial success).
+- Handlers must **throw on failure** (no try/catch-and-log: that silently disables retries) and be **safe to run twice** (a retry can follow a partial success). Use the second argument, `context.eventId`, to deduplicate side effects (e.g. unique `notifications.event_id`, or `emit(..., { dedupeKey })` for events a handler raises).
 - Payloads must be JSON-safe: ISO strings for dates, decimal strings for money.
 
 ## Testing preference
