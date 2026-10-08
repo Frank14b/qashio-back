@@ -22,3 +22,8 @@ export type EmailVerificationPendingResult = {
 export type OtpSentResult = {
   message: string;
 };
+
+/** OTP sent and bound to this client: `otpToken` must accompany the code on confirm. */
+export type BoundOtpSentResult = OtpSentResult & {
+  otpToken: string;
+};

@@ -12,4 +12,10 @@ export enum ActivityAction {
   ACCOUNT_CREATE = 'account.create',
   ACCOUNT_UPDATE = 'account.update',
   CATEGORY_CREATE = 'category.create',
+  TRANSACTION_CREATE = 'transaction.create',
+  TRANSACTION_UPDATE = 'transaction.update',
+  TRANSACTION_DELETE = 'transaction.delete',
+  BUDGET_CREATE = 'budget.create',
+  BUDGET_UPDATE = 'budget.update',
+  BUDGET_DELETE = 'budget.delete',
 }

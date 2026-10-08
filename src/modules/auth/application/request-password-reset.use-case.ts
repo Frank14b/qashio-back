@@ -9,7 +9,7 @@ import {
 } from '@/modules/users/domain/ports/user.repository.port';
 import { OtpPurpose } from '../domain/otp-purpose';
 import { OTP_SERVICE, OtpPort } from '../domain/ports/otp.port';
-import { OtpSentResult } from './auth.types';
+import { BoundOtpSentResult } from './auth.types';
 
 export type RequestPasswordResetCommand = {
   email: string;
@@ -26,20 +26,27 @@ export class RequestPasswordResetUseCase {
     @Inject(EMAIL_SENDER) private readonly emails: EmailSenderPort,
   ) {}
 
-  async execute(command: RequestPasswordResetCommand): Promise<OtpSentResult> {
+  async execute(command: RequestPasswordResetCommand): Promise<BoundOtpSentResult> {
     const email = command.email.trim().toLowerCase();
     const user = await this.users.findByEmail(email);
 
     if (user?.isActive) {
       const code = await this.otp.issue(email, OtpPurpose.PASSWORD_RESET);
+      const otpToken = await this.otp.bindClient(email, OtpPurpose.PASSWORD_RESET);
       await this.emails.send({
         to: email,
         subject: 'Reset your Qashio password',
         text: `Your password reset code is ${code}. It expires soon.`,
         html: `<p>Your password reset code is <strong>${code}</strong>.</p>`,
       });
+      return { message: GENERIC_MESSAGE, otpToken };
     }
 
-    return { message: GENERIC_MESSAGE };
+    // Same response shape for unknown emails so the endpoint does not reveal accounts;
+    // this token is bound to no code, so it can never confirm a reset.
+    return {
+      message: GENERIC_MESSAGE,
+      otpToken: await this.otp.bindClient(email, OtpPurpose.PASSWORD_RESET),
+    };
   }
 }

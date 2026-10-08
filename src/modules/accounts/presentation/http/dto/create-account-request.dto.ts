@@ -8,9 +8,12 @@ import {
   Length,
   MaxLength,
 } from 'class-validator';
+import { IsDecimalString } from '@/shared/money/is-decimal-string.decorator';
+import { Trim } from '@/shared/validation/trim.transform';
 
 export class CreateAccountRequestDto {
   @ApiProperty({ example: 'Cash' })
+  @Trim()
   @IsString()
   @IsNotEmpty()
   @MaxLength(120)
@@ -21,7 +24,7 @@ export class CreateAccountRequestDto {
   @IsNotEmpty()
   @Length(3, 3)
   @Transform(({ value }: { value: unknown }) =>
-    typeof value === 'string' ? value.toUpperCase() : value,
+    typeof value === 'string' ? value.trim().toUpperCase() : value,
   )
   currencyCode!: string;
 
@@ -32,4 +35,14 @@ export class CreateAccountRequestDto {
   @IsOptional()
   @IsBoolean()
   isDefault?: boolean;
+
+  @ApiPropertyOptional({
+    example: '1500.00',
+    type: String,
+    description:
+      'Balance before the first transaction (decimal string or number, may be negative). Defaults to 0.',
+  })
+  @IsOptional()
+  @IsDecimalString()
+  openingBalance?: string;
 }

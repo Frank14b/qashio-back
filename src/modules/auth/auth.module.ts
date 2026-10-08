@@ -15,11 +15,13 @@ import { VerifyEmailUseCase } from './application/verify-email.use-case';
 import { AUTH_SESSION_REPOSITORY } from './domain/ports/auth-session.repository.port';
 import { OTP_SERVICE } from './domain/ports/otp.port';
 import { PASSWORD_HASHER } from './domain/ports/password-hasher.port';
+import { REFRESH_ROTATION_STORE } from './domain/ports/refresh-rotation.port';
 import { TOKEN_SERVICE } from './domain/ports/token.service.port';
 import { BcryptPasswordHasher } from './infrastructure/crypto/bcrypt-password-hasher';
 import { JwtTokenService } from './infrastructure/crypto/jwt-token.service';
 import { RedisOtpService } from './infrastructure/otp/redis-otp.service';
 import { AuthSessionOrmEntity } from './infrastructure/persistence/auth-session.orm-entity';
+import { RedisRefreshRotationStore } from './infrastructure/redis/redis-refresh-rotation.store';
 import { TypeOrmAuthSessionRepository } from './infrastructure/persistence/typeorm-auth-session.repository';
 import { JwtAuthGuard } from './presentation/guards/jwt-auth.guard';
 import { AuthController } from './presentation/http/auth.controller';
@@ -66,6 +68,10 @@ import { AuthController } from './presentation/http/auth.controller';
     {
       provide: OTP_SERVICE,
       useClass: RedisOtpService,
+    },
+    {
+      provide: REFRESH_ROTATION_STORE,
+      useClass: RedisRefreshRotationStore,
     },
   ],
   exports: [JwtModule, JwtAuthGuard],

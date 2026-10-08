@@ -4,9 +4,10 @@ import { AuthModule } from '@/modules/auth/auth.module';
 import { CurrenciesModule } from '@/modules/currencies/currencies.module';
 import { CreateAccountUseCase } from './application/create-account.use-case';
 import { CreateDefaultAccountsUseCase } from './application/create-default-accounts.use-case';
+import { GetAccountBalancesUseCase } from './application/get-account-balances.use-case';
 import { GetAccountUseCase } from './application/get-account.use-case';
 import { ListAccountsUseCase } from './application/list-accounts.use-case';
-import { UserActivatedListener } from './application/listeners/user-activated.listener';
+import { DefaultAccountsListener } from './application/listeners/user-activated.listener';
 import { UpdateAccountUseCase } from './application/update-account.use-case';
 import { ACCOUNT_REPOSITORY } from './domain/ports/account.repository.port';
 import { AccountOrmEntity } from './infrastructure/persistence/account.orm-entity';
@@ -25,13 +26,14 @@ import { AccountsController } from './presentation/http/accounts.controller';
     CreateDefaultAccountsUseCase,
     ListAccountsUseCase,
     GetAccountUseCase,
+    GetAccountBalancesUseCase,
     UpdateAccountUseCase,
-    UserActivatedListener,
+    DefaultAccountsListener,
     {
       provide: ACCOUNT_REPOSITORY,
       useClass: TypeOrmAccountRepository,
     },
   ],
-  exports: [ACCOUNT_REPOSITORY, CreateDefaultAccountsUseCase],
+  exports: [ACCOUNT_REPOSITORY, CreateDefaultAccountsUseCase, GetAccountBalancesUseCase],
 })
 export class AccountsModule {}

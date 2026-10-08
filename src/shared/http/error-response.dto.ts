@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import type { ErrorResponseBody } from './http-exception.filter';
 
 /** OpenAPI shape matching {@link ErrorResponseBody} from HttpExceptionFilter. */
@@ -22,9 +22,28 @@ export class ErrorResponseDto implements ErrorResponseBody {
   })
   message!: string | string[];
 
+  @ApiPropertyOptional({
+    example: 'POSSIBLE_DUPLICATE',
+    description: 'Machine-readable reason, present when the client is expected to react',
+  })
+  code?: string;
+
+  @ApiPropertyOptional({
+    type: 'object',
+    additionalProperties: true,
+    description: 'Extra data for `code` (e.g. `duplicateOf` for POSSIBLE_DUPLICATE)',
+  })
+  details?: Record<string, unknown>;
+
   @ApiProperty({ example: '/auth/login' })
   path!: string;
 
   @ApiProperty({ example: '2026-10-06T12:00:00.000Z' })
   timestamp!: string;
+
+  @ApiProperty({
+    example: '3f2b8c1e-6a4d-4e2a-9c51-0b7d8e9f1a23',
+    description: 'Request id (also in the X-Request-Id header) for log correlation',
+  })
+  requestId?: string;
 }

@@ -31,6 +31,10 @@ import { JwtAuthGuard } from '@/modules/auth/presentation/guards/jwt-auth.guard'
 import { ErrorResponseDto } from '@/shared/http/error-response.dto';
 import { Account } from '../../domain/entities/account.entity';
 import { CreateAccountUseCase } from '../../application/create-account.use-case';
+import {
+  AccountBalance,
+  GetAccountBalancesUseCase,
+} from '../../application/get-account-balances.use-case';
 import { GetAccountUseCase } from '../../application/get-account.use-case';
 import { ListAccountsUseCase } from '../../application/list-accounts.use-case';
 import { UpdateAccountUseCase } from '../../application/update-account.use-case';
@@ -48,6 +52,7 @@ export class AccountsController {
     private readonly listAccounts: ListAccountsUseCase,
     private readonly getAccount: GetAccountUseCase,
     private readonly updateAccount: UpdateAccountUseCase,
+    private readonly getAccountBalances: GetAccountBalancesUseCase,
   ) {}
 
   @Post()
@@ -68,12 +73,13 @@ export class AccountsController {
       name: body.name,
       currencyCode: body.currencyCode,
       isDefault: body.isDefault,
+      openingBalance: body.openingBalance,
     });
-    return this.toResponse(account);
+    return this.toSingleResponse(user.sub, account);
   }
 
   @Get()
-  @ApiOperation({ summary: 'List wallets for the authenticated user' })
+  @ApiOperation({ summary: 'List wallets (with derived balances) for the authenticated user' })
   @ApiQuery({
     name: 'includeArchived',
     required: false,
@@ -91,11 +97,12 @@ export class AccountsController {
       userId: user.sub,
       includeArchived,
     });
-    return accounts.map((a) => this.toResponse(a));
+    const balances = await this.getAccountBalances.execute(user.sub, accounts);
+    return accounts.map((a) => this.toResponse(a, balances.get(a.id)));
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Get one wallet by id' })
+  @ApiOperation({ summary: 'Get one wallet by id (with derived balance)' })
   @ApiOkResponse({ type: AccountResponseDto })
   @ApiNotFoundResponse({ type: ErrorResponseDto })
   @ApiUnauthorizedResponse({ type: ErrorResponseDto })
@@ -107,7 +114,7 @@ export class AccountsController {
       userId: user.sub,
       accountId: id,
     });
-    return this.toResponse(account);
+    return this.toSingleResponse(user.sub, account);
   }
 
   @Patch(':id')
@@ -116,7 +123,7 @@ export class AccountsController {
     resourceType: 'account',
     resourceIdFrom: 'id',
   })
-  @ApiOperation({ summary: 'Update wallet name, default flag, or archive' })
+  @ApiOperation({ summary: 'Update wallet name, opening balance, default flag, or archive' })
   @ApiOkResponse({ type: AccountResponseDto })
   @ApiNotFoundResponse({ type: ErrorResponseDto })
   @ApiUnauthorizedResponse({ type: ErrorResponseDto })
@@ -131,15 +138,23 @@ export class AccountsController {
       name: body.name,
       isDefault: body.isDefault,
       archive: body.archive,
+      openingBalance: body.openingBalance,
     });
-    return this.toResponse(account);
+    return this.toSingleResponse(user.sub, account);
   }
 
-  private toResponse(account: Account): AccountResponseDto {
+  private async toSingleResponse(userId: string, account: Account): Promise<AccountResponseDto> {
+    const balances = await this.getAccountBalances.execute(userId, [account]);
+    return this.toResponse(account, balances.get(account.id));
+  }
+
+  private toResponse(account: Account, money?: AccountBalance): AccountResponseDto {
     return {
       id: account.id,
       name: account.name,
       currencyCode: account.currencyCode,
+      openingBalance: money?.openingBalance ?? account.openingBalance,
+      balance: money?.balance ?? account.openingBalance,
       isDefault: account.isDefault,
       archivedAt: account.archivedAt?.toISOString() ?? null,
       createdAt: account.createdAt.toISOString(),

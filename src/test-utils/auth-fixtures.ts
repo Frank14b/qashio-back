@@ -61,7 +61,18 @@ export function makeUserRepository() {
 export function makeOtpService() {
   return {
     issue: jest.fn(async () => '123456'),
+    bindClient: jest.fn(async () => 'otp-client-token'),
     verify: jest.fn(async () => true),
+  };
+}
+
+/** In-memory RefreshRotationStorePort; lock is free and no result is cached by default. */
+export function makeRefreshRotationStore() {
+  return {
+    tryLock: jest.fn(async () => true),
+    release: jest.fn(async () => undefined),
+    getResult: jest.fn(async () => null as unknown),
+    saveResult: jest.fn(async () => undefined),
   };
 }
 

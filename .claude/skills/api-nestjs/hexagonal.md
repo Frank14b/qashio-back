@@ -46,7 +46,8 @@ export class CreateTransactionUseCase {
   constructor(
     @Inject(TRANSACTION_REPOSITORY)
     private readonly transactions: TransactionRepositoryPort,
-    private readonly events: EventEmitter2,
+    @Inject(DOMAIN_EVENT_PUBLISHER)
+    private readonly events: DomainEventPublisherPort,
   ) {}
 }
 ```
@@ -55,9 +56,11 @@ Name application classes `*UseCase` (`*.use-case.ts`). Keep `*Service` for infra
 
 ## Events
 
-- Emit from **application** after a successful write (e.g. `transaction.created`).
-- Listeners live in `application` or a dedicated `infrastructure/messaging` adapter registered in the module.
-- Keep listeners idempotent where practical.
+- Emit from **application** after a successful write (e.g. `transaction.created`) through `DOMAIN_EVENT_PUBLISHER` — never inject `Queue`/`EventEmitter2` into use cases.
+- The publisher (`src/shared/events`) enqueues **one BullMQ job per handler** on the `domain-events` queue: 5 attempts, exponential backoff, failed jobs kept 7 days. Jobs live in Redis, so they survive an API restart.
+- Handlers are provider methods decorated with `@OnDomainEvent(EVENT)` (in `application/listeners`, registered in the module). Handler id = `ClassName.method`, so listener class names must be unique across modules.
+- Handlers must **throw on failure** (no try/catch-and-log: that silently disables retries) and be **safe to run twice** (a retry can follow a partial success).
+- Payloads must be JSON-safe: ISO strings for dates, decimal strings for money.
 
 ## Testing preference
 

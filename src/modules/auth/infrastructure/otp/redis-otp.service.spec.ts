@@ -11,6 +11,10 @@ describe('RedisOtpService', () => {
     set: jest.fn(),
     get: jest.fn(),
     del: jest.fn(),
+    hget: jest.fn(),
+    hset: jest.fn(),
+    hincrby: jest.fn(),
+    expire: jest.fn(),
   };
   const config = {
     get: jest.fn((key: string, fallback?: string): string => {

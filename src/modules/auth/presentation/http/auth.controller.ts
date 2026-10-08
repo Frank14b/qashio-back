@@ -7,12 +7,15 @@ import {
   ApiOkResponse,
   ApiOperation,
   ApiTags,
+  ApiTooManyRequestsResponse,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import type { Request } from 'express';
 import { ActivityAction } from '@/modules/activity-logs/domain/activity-action.enum';
 import { LogActivity } from '@/modules/activity-logs/presentation/decorators/log-activity.decorator';
 import { ErrorResponseDto } from '@/shared/http/error-response.dto';
+import { REFRESH_THROTTLE, STRICT_AUTH_THROTTLE } from '@/shared/rate-limit/rate-limit.module';
 import { ConfirmChangePasswordUseCase } from '../../application/confirm-change-password.use-case';
 import { ConfirmPasswordResetUseCase } from '../../application/confirm-password-reset.use-case';
 import { LoginUserUseCase } from '../../application/login-user.use-case';
@@ -28,6 +31,7 @@ import { ConfirmChangePasswordRequestDto } from './dto/confirm-change-password-r
 import { ForgotPasswordRequestDto } from './dto/forgot-password-request.dto';
 import { LoginRequestDto } from './dto/login-request.dto';
 import { MessageResponseDto } from './dto/message-response.dto';
+import { OtpSentResponseDto } from './dto/otp-sent-response.dto';
 import { RefreshRequestDto } from './dto/refresh-request.dto';
 import { RegisterPendingResponseDto } from './dto/register-pending-response.dto';
 import { RegisterRequestDto } from './dto/register-request.dto';
@@ -50,6 +54,8 @@ export class AuthController {
   ) {}
 
   @Post('register')
+  @Throttle(STRICT_AUTH_THROTTLE)
+  @ApiTooManyRequestsResponse({ type: ErrorResponseDto })
   @LogActivity({
     action: ActivityAction.AUTH_REGISTER,
     resourceType: 'user',
@@ -73,6 +79,8 @@ export class AuthController {
   }
 
   @Post('verify-email')
+  @Throttle(STRICT_AUTH_THROTTLE)
+  @ApiTooManyRequestsResponse({ type: ErrorResponseDto })
   @HttpCode(200)
   @LogActivity({
     action: ActivityAction.AUTH_VERIFY_EMAIL,
@@ -93,6 +101,8 @@ export class AuthController {
   }
 
   @Post('login')
+  @Throttle(STRICT_AUTH_THROTTLE)
+  @ApiTooManyRequestsResponse({ type: ErrorResponseDto })
   @HttpCode(200)
   @LogActivity({
     action: ActivityAction.AUTH_LOGIN,
@@ -116,6 +126,8 @@ export class AuthController {
   }
 
   @Post('refresh')
+  @Throttle(REFRESH_THROTTLE)
+  @ApiTooManyRequestsResponse({ type: ErrorResponseDto })
   @HttpCode(200)
   @LogActivity({
     action: ActivityAction.AUTH_REFRESH,
@@ -163,19 +175,25 @@ export class AuthController {
   }
 
   @Post('forgot-password')
+  @Throttle(STRICT_AUTH_THROTTLE)
+  @ApiTooManyRequestsResponse({ type: ErrorResponseDto })
   @HttpCode(200)
   @LogActivity({
     action: ActivityAction.AUTH_FORGOT_PASSWORD,
     resourceType: 'user',
   })
-  @ApiOperation({ summary: 'Request a password-reset OTP by email' })
-  @ApiOkResponse({ type: MessageResponseDto })
+  @ApiOperation({
+    summary: 'Request a password-reset OTP by email; returns the otpToken required to confirm it',
+  })
+  @ApiOkResponse({ type: OtpSentResponseDto })
   @ApiBadRequestResponse({ type: ErrorResponseDto })
   forgotPassword(@Body() body: ForgotPasswordRequestDto) {
     return this.requestPasswordReset.execute(body);
   }
 
   @Post('reset-password')
+  @Throttle(STRICT_AUTH_THROTTLE)
+  @ApiTooManyRequestsResponse({ type: ErrorResponseDto })
   @HttpCode(200)
   @LogActivity({
     action: ActivityAction.AUTH_RESET_PASSWORD,
@@ -190,6 +208,8 @@ export class AuthController {
   }
 
   @Post('change-password/request')
+  @Throttle(STRICT_AUTH_THROTTLE)
+  @ApiTooManyRequestsResponse({ type: ErrorResponseDto })
   @HttpCode(200)
   @LogActivity({
     action: ActivityAction.AUTH_CHANGE_PASSWORD_REQUEST,
@@ -206,6 +226,8 @@ export class AuthController {
   }
 
   @Post('change-password/confirm')
+  @Throttle(STRICT_AUTH_THROTTLE)
+  @ApiTooManyRequestsResponse({ type: ErrorResponseDto })
   @HttpCode(200)
   @LogActivity({
     action: ActivityAction.AUTH_CHANGE_PASSWORD,

@@ -1,9 +1,8 @@
 # Qashio API — Domain docs
 
-Design notes for the backend data model and core user journeys.
+| Doc | Status | Contents |
+|-----|--------|----------|
+| [Database schema & diagrams — v2](./database-v2.md) | **Current** | Schema generated from the migrated DB, ERD, integrity rules and known gaps, derived values, Redis keyspace, BullMQ event flow, and sequence diagrams (idempotent create, budget alert, refresh rotation, password reset) |
+| [Database schema & auth flows — v1](./database-and-auth.md) | Historical | Original design written before implementation |
 
-| Doc | Contents |
-|-----|----------|
-| [Database schema & auth flows](./database-and-auth.md) | ER diagram, tables, auth/session/wallet/transaction flows |
-
-Start with **database-and-auth.md** before implementing Nest modules.
+Diagrams are Mermaid, so they render on GitHub and in most IDE previews.
