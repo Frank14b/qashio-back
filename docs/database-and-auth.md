@@ -1,4 +1,6 @@
-# Database schema & user flows
+# Database schema & user flows (v1, historical)
+
+> **Superseded by [v2](./database-v2.md)**, which describes the schema as implemented: transactions, budgets, notifications, idempotency keys, composite ownership FKs and the BullMQ event queue. This page is the original design and is kept for history.
 
 Design for a basic multi-wallet expense tracker: **auth → sessions → accounts (wallets) → transactions**.
 

@@ -1,8 +1,8 @@
 # Qashio API
 
-NestJS backend for the Qashio expense tracker. Exposes REST APIs for transactions, categories, and budgets, with Postgres as the source of truth and Redis for caching / queues.
+NestJS backend for the Qashio expense tracker. It covers wallets, income and expenses, categories, budgets with alerts, and in-app notifications. Postgres is the source of truth. Redis holds OTPs, refresh locks, rate limits and the domain-event queue.
 
-**Domain design:** see [`docs/`](./docs/) — [database schema & auth flows](./docs/database-and-auth.md).
+**Design docs:** [Database schema & diagrams v2](./docs/database-v2.md) is the current schema, ERD, Redis keyspace and flow diagrams. [v1](./docs/database-and-auth.md) is the original design, kept for history.
 
 ---
 
@@ -10,41 +10,41 @@ NestJS backend for the Qashio expense tracker. Exposes REST APIs for transaction
 
 | Area | Choice |
 |------|--------|
-| Framework | NestJS 11 |
-| Language | TypeScript |
-| ORM | TypeORM or Prisma (preferred: TypeORM) |
-| Database | PostgreSQL |
-| Cache / queues | Redis (Bull/BullMQ for background jobs) |
-| Events | NestJS EventEmitter (domain events; Kafka optional later) |
-| Validation | class-validator + class-transformer (DTOs) |
-| Docs | Swagger / OpenAPI |
-| Quality | ESLint, Prettier, Husky, lint-staged, Jest |
+| Framework | NestJS 11, TypeScript, hexagonal modules (domain / application / infrastructure / presentation) |
+| Database | PostgreSQL 15 + TypeORM migrations (`synchronize` off) |
+| Redis | ioredis: OTPs, refresh-rotation locks, rate limiting, BullMQ |
+| Domain events | **BullMQ** `domain-events` queue: one job per handler, 5 attempts, exponential backoff |
+| Money | `numeric(19,4)` columns, decimal strings + `decimal.js` in code |
+| Validation | class-validator DTOs; zod for environment variables |
+| Observability | nestjs-pino (JSON logs, `X-Request-Id`), `@nestjs/terminus` health, optional Sentry |
+| Security | JWT access + rotating refresh tokens, `@nestjs/throttler` (Redis storage), bcrypt |
+| Docs | Swagger at `/docs` (not in production) |
+| Quality | Jest, ESLint, Prettier, Husky + lint-staged |
 
 ---
 
-## Project structure (target)
-
-Nest modular layout — one module per domain:
+## Project structure
 
 ```text
 src/
-  main.ts
+  main.ts / instrument.ts      # bootstrap; instrument.ts validates env + starts Sentry first
   app.module.ts
-  shared/                    # shared pipes, filters, guards, utils
-  transactions/
-    transactions.module.ts
-    transactions.controller.ts
-    transactions.service.ts
-    dto/
-    entities/
-  categories/
-    ...
-  budgets/
-    ...
-  # optional later:
-  # redis/  cache + queue module
-  # events/ listeners for transaction created/updated
+  modules/
+    auth/                      # register, OTP verify, login, refresh rotation, password reset/change
+    users/  accounts/  currencies/  categories/
+    transactions/              # CRUD, idempotent create, summary
+    budgets/                   # limits per wallet + category + period, threshold alerts
+    notifications/             # in-app feed + budget alert emails
+    activity-logs/             # @LogActivity audit trail
+    health/                    # /health, /health/live
+  shared/
+    config/                    # zod env schema
+    database/                  # TypeORM config, data source, migrations
+    events/                    # DomainEventPublisher (BullMQ), @OnDomainEvent, worker
+    http/  logging/  money/  rate-limit/  redis/  email/  validation/
 ```
+
+Each module follows `domain/` (entities, ports, events) → `application/` (use cases, listeners) → `infrastructure/` (TypeORM, Redis adapters) → `presentation/http/` (controllers, DTOs).
 
 ---
 
@@ -52,61 +52,52 @@ src/
 
 ### Prerequisites
 
-- Node.js 18+ (22 recommended to match `Dockerfile.dev`)
-- npm
-- PostgreSQL + Redis (via Docker Compose from repo root, or local installs)
+- Node.js 22 (matches `Dockerfile.dev`)
+- PostgreSQL + Redis (Docker Compose from the repo root, or local installs)
 
 ### Environment
-
-Copy and adjust as needed (do not commit real secrets):
 
 ```bash
 cp .env.example .env
 ```
 
-Example variables (see `.env.example` for the full list):
+Every variable is validated at startup by `src/shared/config/env.ts` (zod). Invalid config stops the process and lists every problem.
 
-```env
-PORT=3000
-DATABASE_URL=postgresql://postgres:password@localhost:5432/qashio_points
-REDIS_HOST=localhost
-REDIS_PORT=6379
-EMAIL_OTP_MODE=fixed
-EMAIL_OTP_TTL_SECONDS=600
-RUN_MIGRATIONS=true      # Docker entrypoint applies pending migrations on start
-# SEED_CURRENCIES=false  # optional; currencies are upserted on boot by default
-SMTP_HOST=localhost
-SMTP_PORT=1025
-SMTP_FROM=noreply@qashio.local
-```
-
-- `EMAIL_OTP_MODE=fixed` → OTP is always `123456` (local/dev)
-- `EMAIL_OTP_MODE=live` → random 6-digit OTP emailed via Nodemailer
-- **Schema:** managed by TypeORM migrations only — `synchronize` is always off. See [Migrations](#migrations).
-- **Currency seed:** on boot, currencies are upserted by ISO `code` (idempotent). Set `SEED_CURRENCIES=false` to skip; force with `npm run seed`.
+| Variable | Default | Notes |
+|----------|---------|-------|
+| `DATABASE_URL` | — (required) | `postgres://…` |
+| `REDIS_URL` or `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` | `localhost:6379` | Shared by OTPs, throttling and BullMQ |
+| `JWT_ACCESS_SECRET` | — (required, ≥16; ≥32 in production) | |
+| `JWT_ACCESS_EXPIRES_IN` / `JWT_REFRESH_EXPIRES_DAYS` | `15m` / `30` | |
+| `EMAIL_OTP_MODE` | `fixed` | `fixed` always issues `123456` (dev only; production requires `live`) |
+| `EMAIL_OTP_TTL_SECONDS` | `600` | |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` | `localhost:587` | |
+| `CORS_ORIGIN` | localhost:3000/3001/4000 | Comma-separated |
+| `RATE_LIMIT_PER_MINUTE` | `120` | Global per-IP limit |
+| `TRUST_PROXY` | — | Set behind a load balancer so rate limits see the client IP |
+| `LOG_LEVEL` | `info` | |
+| `RUN_MIGRATIONS` | `true` | Docker entrypoint runs pending migrations |
+| `SEED_CURRENCIES` | `true` | Idempotent currency upsert on boot |
+| `HEALTH_MEMORY_HEAP_MB` / `HEALTH_MEMORY_RSS_MB` | `512` / `1024` | |
+| `SENTRY_ENABLED` / `SENTRY_DSN` / `SENTRY_ENVIRONMENT` / `SENTRY_TRACES_SAMPLE_RATE` | off | DSN required when enabled |
 
 ### Local
 
 ```bash
-cd qashio-api
 npm install
-npm run migration:run # apply pending migrations
-npm run seed          # optional explicit currency upsert
+npm run migration:run
 npm run start:dev
 ```
 
-API: [http://localhost:3000](http://localhost:3000)  
-Swagger: [http://localhost:3000/docs](http://localhost:3000/docs) (disabled when `NODE_ENV=production`)
+API on [http://localhost:3000](http://localhost:3000), Swagger at [http://localhost:3000/docs](http://localhost:3000/docs).
 
-### Docker (from repo root)
+### Docker (from the repo root)
 
 ```bash
-docker compose up -d --build qashio-api postgres redis
+docker compose up -d --build --wait qashio-api
 ```
 
-The API entrypoint runs `npm run migration:run` before starting (Postgres has a healthcheck, so it waits for the DB). Set `RUN_MIGRATIONS=false` to skip.
-
-API is mapped to [http://localhost:3000](http://localhost:3000). Swagger: [http://localhost:3000/docs](http://localhost:3000/docs) when not in production.
+The entrypoint applies pending migrations before starting (`RUN_MIGRATIONS=false` to skip). Postgres has a healthcheck, and `--wait` blocks until `/health` is green.
 
 ---
 
@@ -114,172 +105,122 @@ API is mapped to [http://localhost:3000](http://localhost:3000). Swagger: [http:
 
 | Command | Description |
 |---------|-------------|
-| `npm run start:dev` | Watch mode |
-| `npm run start` | Standard start |
-| `npm run start:prod` | Run compiled `dist` |
-| `npm run build` | Compile TypeScript |
-| `npm run lint` | ESLint (fix) |
-| `npm run format` | Prettier write |
-| `npm run format:check` | Prettier check |
-| `npm test` | Unit tests |
-| `npm run test:e2e` | E2E tests |
-| `npm run test:cov` | Coverage |
-| `npm run seed` | Idempotent currency upsert (ISO codes) |
-| `npm run migration:run` | Apply pending migrations |
-| `npm run migration:revert` | Revert the last migration |
-| `npm run migration:show` | List migrations and whether they ran |
-| `npm run migration:generate -- src/shared/database/migrations/<Name>` | Generate a migration from entity changes |
-| `npm run migration:create -- src/shared/database/migrations/<Name>` | Empty migration |
-| `npm run migration:check` | Fails if entities and migrations are out of sync |
+| `npm run start:dev` / `start` / `start:prod` | Watch mode / start / run compiled `dist` |
+| `npm run build` | Compile |
+| `npm test` / `test:cov` / `test:e2e` | Unit tests / coverage / e2e |
+| `npm run lint` / `format` / `format:check` | ESLint / Prettier |
+| `npm run seed` | Idempotent currency upsert |
+| `npm run migration:run` / `migration:revert` / `migration:show` | Apply / revert last / list |
+| `npm run migration:generate -- src/shared/database/migrations/<Name>` | Generate from entity changes |
+| `npm run migration:check` | Fails if entities and migrations differ (use in CI) |
 | `npm run migration:run:prod` | Apply migrations from compiled `dist` |
 
-### Migrations
-
-- Files live in `src/shared/database/migrations`; the CLI data source is `src/shared/database/data-source.ts` (shares options with `DatabaseModule` via `typeorm.config.ts`).
-- `InitialSchema` is the baseline of the schema previously created by `synchronize`. It is idempotent (`IF NOT EXISTS`, same constraint names), so existing dev databases just record it as applied.
-- After changing an `*.orm-entity.ts`, run `migration:generate`, review the SQL, commit it, and keep `migration:check` green.
-
-Pre-commit (Husky + lint-staged) runs ESLint and Prettier on staged files when hooks are installed via `npm install` / `npm run prepare`.
+**Migrations:** after changing an `*.orm-entity.ts`, run `migration:generate`, review the SQL, commit it, and keep `migration:check` green. `InitialSchema` is idempotent, so databases created by the old `synchronize` simply record it as applied.
 
 ---
 
-## API surface
+## API
 
-### Observability & abuse protection
+All routes except auth, `/currencies` and `/health*` need `Authorization: Bearer <access token>`. Errors use one shape: `{ statusCode, error, message, code?, details?, path, timestamp, requestId }`.
 
-- **Environment validation:** `src/shared/config/env.ts` (zod) validates every variable at startup (`instrument.ts`, before anything loads) and backs `ConfigModule`, so `ConfigService` returns typed values. Invalid config stops the process with a list of every problem. Production guardrails: `EMAIL_OTP_MODE=live`, a unique 32+ char `JWT_ACCESS_SECRET`; `SENTRY_ENABLED=true` requires `SENTRY_DSN`. The migration CLI only checks `DATABASE_URL`.
-- **Sentry** (`@sentry/nestjs`, off by default — `SENTRY_ENABLED` + `SENTRY_DSN`): unexpected errors and error-level logs (e.g. failing event listeners) are reported once, tagged `request_id`; expected HTTP errors (4xx, deliberate 5xx such as the health 503) are not. Request/response bodies, cookies and auth headers are never sent.
-
-- **Request id:** every response carries `X-Request-Id` (the caller's value if valid, else a UUID). Logs are structured JSON via `nestjs-pino` (pretty in dev); every line written while handling the request — including async event listeners (budgets, notifications) — has the same `req.id`. Error bodies include `requestId`; activity logs store it in `metadata.requestId`. The web app sends its own id per action (reused on the retry after a token refresh).
-- **Rate limits** (`@nestjs/throttler`, Redis storage, per IP): global `RATE_LIMIT_PER_MINUTE` (120); login, register, verify-email, forgot/reset password and change-password 5/min; refresh 30/min; `/health` exempt. Exceeding returns 429. Set `TRUST_PROXY` behind a load balancer.
-- **OTP brute force:** each code is discarded after 5 wrong attempts (per email, across IPs).
-- **Password reset binding:** `POST /auth/forgot-password` returns an `otpToken` (same shape for unknown emails); `POST /auth/reset-password` requires it with the OTP, so only the client that requested the code can use it. Only the token's hash is stored.
-- **Refresh rotation:** a Redis `SET NX` lock per refresh token makes rotation single-flight across requests and instances; the new pair is replayed for 30s to concurrent/late callers with the same old token (parallel calls, other tabs) instead of logging them out.
-
-### Health (public)
+### Auth
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/health/live` | Liveness — process is up (no dependency checks); use for restarts |
-| `GET` | `/health` | Readiness — app, database, Redis, heap and RSS memory. **503** if any is down; body names the failing check |
+| `POST` | `/auth/register` | Create an inactive user and email an OTP |
+| `POST` | `/auth/verify-email` | Activate, open a session, emit `user.activated` (default wallets + categories) |
+| `POST` | `/auth/login` | Access + refresh token |
+| `POST` | `/auth/refresh` | Rotate the refresh token (single-flight, see below) |
+| `POST` | `/auth/logout` | Revoke the session |
+| `POST` | `/auth/forgot-password` | Email a reset OTP and return an `otpToken` (same response for unknown emails) |
+| `POST` | `/auth/reset-password` | OTP + `otpToken` + new password; revokes all sessions |
+| `POST` | `/auth/change-password/request` / `confirm` | Current password → OTP → new password |
 
-Memory limits: `HEALTH_MEMORY_HEAP_MB` (default 512), `HEALTH_MEMORY_RSS_MB` (default 1024). `APP_VERSION` is echoed in the `app` check.
-
-**Pipeline usage:** Compose has a healthcheck on `/health`, so `docker compose up -d --wait qashio-api` blocks until the API is ready and exits non-zero if it never becomes healthy. Against a deployed URL: `curl -fsS https://<host>/health` (non-zero exit on 503).
-
-### Auth (existing)
+### Wallets, currencies, categories
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/auth/register` | Register (inactive until OTP) |
-| `POST` | `/auth/verify-email` | Activate user + session; emits `user.activated` |
-| `POST` | `/auth/login` | Login (verified users) |
-| `POST` | `/auth/refresh` / `/auth/logout` | Session rotation / revoke |
+| `GET` | `/currencies` | Seeded currencies (public) |
+| `POST` / `GET` | `/accounts` | Create / list wallets (`?includeArchived=`), with derived `balance` |
+| `GET` / `PATCH` | `/accounts/:id` | Get / rename, opening balance, set default, archive. Currency is fixed |
+| `POST` / `GET` | `/categories` | Create / list (`kind`: `income`, `expense`, `both`) |
 
-### Currencies / accounts / categories / transactions
+### Transactions
 
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| `GET` | `/currencies` | No | List seeded currencies |
-| `POST` | `/accounts` | Bearer | Create wallet |
-| `GET` | `/accounts` | Bearer | List wallets (`?includeArchived=`) |
-| `GET` | `/accounts/:id` | Bearer | Get one |
-| `PATCH` | `/accounts/:id` | Bearer | Rename / opening balance / set default / archive |
-| `POST` | `/categories` | Bearer | Create category |
-| `GET` | `/categories` | Bearer | List categories |
-| `POST` | `/transactions` | Bearer | Record income / expense (`accountId` optional → default wallet). **Requires `Idempotency-Key: <uuid>`** |
-| `GET` | `/transactions` | Bearer | List — `page`, `limit` (≤100), `sortBy`, `sortOrder`, `accountId`, `categoryId`, `type`, `status`, `from`, `to`, `search` |
-| `GET` | `/transactions/summary` | Bearer | Completed income / expense / net per currency (`accountId`, `from`, `to`) |
-| `GET` | `/transactions/:id` | Bearer | Get one |
-| `PUT` | `/transactions/:id` | Bearer | Update (only fields sent change) |
-| `DELETE` | `/transactions/:id` | Bearer | Delete (204) |
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/transactions` | Record income or expense. **Requires `Idempotency-Key: <uuid>`** |
+| `GET` | `/transactions` | `page`, `limit` (≤100), `sortBy`, `sortOrder`, `accountId`, `categoryId`, `type`, `status`, `from`, `to`, `search` |
+| `GET` | `/transactions/summary` | Completed income / expense / net per currency |
+| `GET` / `PUT` / `DELETE` | `/transactions/:id` | Get / partial update / delete (204) |
 
-**Money in / out:** `amount` is always positive; `type` gives the direction — `income` adds to the wallet, `expense` subtracts. Responses include `direction` (`in`/`out`) and `signedAmount`. Wallet `balance` = `openingBalance` + completed income − completed expense (derived, never stored). Amounts are decimal strings formatted to the currency's decimal places.
-
-**Duplicate protection on create:**
-- *Retries / double-sends* — the client generates one `Idempotency-Key` (UUID) per user action and reuses it on every retry. The key is stored on the row (unique per user, `UQ_transactions_user_idempotency_key`), so the same action can never insert twice, even when requests race. A retry returns the original transaction with `Idempotent-Replayed: true`; reusing a key with a different payload → `422`. Missing / non-UUID key → `400`.
-- *Accidental re-entry* — a **new** key whose wallet, type, category, amount (and counterparty, if given) match an entry created in the last 2 minutes → `409` with `code: "POSSIBLE_DUPLICATE"` and `details.duplicateOf`. The UI asks the user; "Save anyway" resends with `confirmDuplicate: true` and the same key.
-
-**Events:** `transaction.created`, `transaction.updated` (previous + current snapshot), `transaction.deleted` via `EventEmitter`.
+- **Money in / out:** `amount` is always positive and `type` gives the direction. Responses add `direction` and `signedAmount`. Wallet balance = opening balance + completed income − completed expense. It is derived, never stored.
+- **Retries never double-save:** the client sends one `Idempotency-Key` per user action and reuses it on retry. The key is unique per user in the DB, so even racing requests insert once. A retry returns the original with `Idempotent-Replayed: true`. The same key with a different payload returns `422`; a missing or invalid key returns `400`.
+- **Accidental re-entry:** a new key that matches an entry from the last 2 minutes (wallet, type, category, amount, counterparty) returns `409 POSSIBLE_DUPLICATE` with `details.duplicateOf`. Resending with `confirmDuplicate: true` and the same key saves it.
 
 ### Budgets & notifications
 
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| `POST` | `/budgets` | Bearer | Create budgets on a wallet: `accountId`, `categoryIds[]` (expense/both; one budget each, all or none), `amount`, `period` (`weekly` | `monthly` | `yearly`). Currency is the wallet's |
-| `GET` | `/budgets` | Bearer | List with current-period `usage` (spent, remaining, percentUsed, status) |
-| `GET` | `/budgets/:id` | Bearer | Get one with usage |
-| `PATCH` | `/budgets/:id` | Bearer | Change `amount` and/or `period` (scope is fixed) |
-| `DELETE` | `/budgets/:id` | Bearer | Delete (204) |
-| `GET` | `/notifications` | Bearer | Newest notifications (`limit` ≤ 50, `unreadOnly`) + `unreadCount` |
-| `PATCH` | `/notifications/:id/read` | Bearer | Mark one read (idempotent, 204) |
-| `POST` | `/notifications/read-all` | Bearer | Mark all read (204) |
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/budgets` | `accountId`, `categoryIds[]` (one budget each, all or none), `amount`, `period` (`weekly` / `monthly` / `yearly`). Currency comes from the wallet |
+| `GET` | `/budgets`, `/budgets/:id` | With current-period usage: spent, remaining, percentUsed, status |
+| `PATCH` / `DELETE` | `/budgets/:id` | Change amount / period; delete (204) |
+| `GET` | `/notifications` | Newest first (`limit` ≤ 50, `unreadOnly`) + `unreadCount` |
+| `PATCH` | `/notifications/:id/read` | Mark one read (idempotent, 204) |
+| `POST` | `/notifications/read-all` | Mark all read (204) |
 
-**Flow:** transaction events → budgets listener recomputes usage and emits `budget.threshold_reached` when *this* change crosses 80% or 100% (once per crossing, not on every later expense) → notifications listener stores an in-app notification and emails budget alerts. Transaction and account events (`account.created`, `account.updated`) become in-app notifications only. Usage is derived from transactions, never stored; periods follow Postgres `date_trunc` in the DB time zone (ISO weeks start Monday).
+A budget alert fires when a transaction change **crosses** 80% or 100% of a budget in the current period. Crossing it once raises one alert, not one per later expense. The alert is stored in-app and emailed. Over-budget expenses are never blocked.
 
-**Default categories:** after `POST /auth/verify-email`, Nest `EventEmitter` emits `user.activated`; `UserActivatedListener` creates a sensible default set (Food, Transport, Salary, …) idempotently by name.
+### Health (public, not rate limited)
 
-### Still planned
-
-| Area | Notes |
-|------|-------|
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/health/live` | Liveness: the process is up |
+| `GET` | `/health` | Readiness: app, database, Redis, heap and RSS memory. Returns **503** naming the failing check |
 
 ---
 
-## Starter plan
+## Domain events (BullMQ)
 
-### Done (foundation)
+Use cases emit events through `DOMAIN_EVENT_PUBLISHER` after a successful write. The publisher looks up every `@OnDomainEvent(EVENT)` handler (found at boot with Nest's `DiscoveryService`) and enqueues **one job per handler** on the Redis `domain-events` queue. A worker in the same process runs them.
 
-- [x] NestJS scaffold + TypeScript
-- [x] Dev Dockerfile + Compose wiring (Postgres, Redis)
-- [x] ESLint, Prettier, Husky, lint-staged
-- [x] Shared module + TypeORM database bootstrap
-- [x] Hexagonal `users`, `auth` (sessions), `activity-logs` modules
-- [x] Auth HTTP: register / verify-email / login / refresh / logout + Swagger at `/docs`
-- [x] Redis adapter + Nodemailer email port for OTP flows
-- [x] Signup email verification OTP; forgot-password + change-password with OTP
-- [x] `CurrenciesModule` + idempotent seed (`SEED_CURRENCIES` / `npm run seed`)
-- [x] `AccountsModule` (wallets CRUD-ish + JwtAuthGuard)
-- [x] `CategoriesModule` (create/list + defaults on `user.activated` via EventEmitter)
-- [x] TypeORM migrations (synchronize off; Docker entrypoint runs them)
-- [x] Wallet opening balance + derived balance
-- [x] `TransactionsModule` (CRUD, unique reference, counterparty, status, filters/sort/pagination, summary, domain events)
+| Event | Handlers |
+|-------|----------|
+| `user.activated` | default wallets, default categories |
+| `account.created` / `account.updated` | notifications |
+| `transaction.created` / `.updated` / `.deleted` | budget threshold check, notifications |
+| `budget.threshold_reached` | notifications (in-app + email) |
 
-### Next — core modules
-
-- [x] `BudgetsModule` (per category / period, derived usage, threshold alerts)
-- [x] `NotificationsModule` (in-app feed + email for budget alerts)
-
-### Next — event-driven budget check
-
-- [x] Emit domain event on transaction create/update/delete (Nest `EventEmitter`)
-- [x] Listener: check budget usage on transaction events
-- [ ] Redis cache for hot reads (categories, budget summary)
-- [ ] Optional Bull queue for heavier async work (email batches, multi-instance reliability)
-
-### Later / bonus
-
-- [x] Filtering, sorting, pagination on `GET /transactions`
-- [x] Summary/report endpoint (income vs expense by date range)
-- [ ] Production Dockerfile (`build` + `start:prod`)
-
-### Out of scope for v1 (by design)
-
-- Kafka — prefer Nest events (+ Redis queues). Document as a production scale-up if needed.
+- **Retries:** 5 attempts per handler job, with exponential backoff (2s, 4s, 8s, 16s). A failing handler doesn't re-run the others for the same event.
+- **Durability:** jobs live in Redis, so they survive an API restart. Completed jobs are kept 24 h. Jobs that fail all 5 attempts are kept 7 days and logged at error level, which also reports them to Sentry.
+- **Handler rules:** throw on failure (never catch-and-log, because that disables retries), be safe to run twice, and keep payloads JSON-safe. Listener class names must be unique, because the handler id is `ClassName.method`.
+- **Redis for production:** BullMQ needs `maxmemory-policy noeviction`. Enable AOF (`appendonly yes`) so queued jobs survive a Redis restart; the root `docker-compose.yml` does both.
+- **Known gap:** the job is enqueued right after the DB commit, not inside the transaction. A crash in that window loses the event (it is logged). A transactional outbox would close it if needed.
 
 ---
 
-## Domain model (assignment)
+## Security & observability
 
-**Transaction:** `amount`, `category`, `date`, `type` (`income` | `expense`)
+- **Request id:** every response has `X-Request-Id` (the caller's id if it's safe, else a UUID). It appears in every log line for that request, in error bodies, in `activity_logs.metadata.requestId` and as a Sentry tag.
+- **Rate limits** (per IP, Redis-backed, so shared across instances): global `RATE_LIMIT_PER_MINUTE`; login, register, verify-email, forgot/reset and change password at 5/min; refresh at 30/min. Exceeding a limit returns 429.
+- **OTPs** are stored hashed with a TTL and discarded after 5 wrong attempts. A password reset only works for the client holding the `otpToken` from forgot-password.
+- **Refresh rotation:** a Redis `SET NX PX` lock per token makes rotation single-flight across requests and instances. Concurrent or late callers with the same old token get the same new pair for 30 s instead of being logged out.
+- **Sentry** (off unless `SENTRY_ENABLED=true`): unexpected errors and error-level logs are reported once. Expected 4xx are not. Bodies, cookies and auth headers are never sent.
+- **Env guardrails in production:** `EMAIL_OTP_MODE=live` and a unique JWT secret of 32+ characters are required.
 
-**Category:** required on every transaction; users can create and list categories
+---
 
-**Budget:** amount per category over a period (e.g. monthly); expose spending vs limit
+## Testing
+
+Unit tests cover the critical paths only: money and validation, auth (OTP binding, refresh concurrency), transaction rules and idempotency, budget thresholds, notifications and the event queue. Use cases are tested against mocked ports; the event-queue spec uses Nest's real `DiscoveryService`.
+
+```bash
+npm test
+```
 
 ---
 
 ## Related
 
 - Frontend: `../qashio-frontend-assignment`
-- Repo root: `docker-compose.yml` (API + Postgres + Redis + frontend)
+- Repo root: `docker-compose.yml` (API, Postgres, Redis, frontend, pgAdmin)
