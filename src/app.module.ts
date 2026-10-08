@@ -1,5 +1,4 @@
 import { Module } from '@nestjs/common';
-import { EventEmitterModule } from '@nestjs/event-emitter';
 import { SentryModule } from '@sentry/nestjs/setup';
 import { AccountsModule } from '@/modules/accounts/accounts.module';
 import { ActivityLogsModule } from '@/modules/activity-logs/activity-logs.module';
@@ -18,7 +17,6 @@ import { SharedModule } from '@/shared/shared.module';
   imports: [
     // No-op unless Sentry was initialised (SENTRY_ENABLED + SENTRY_DSN, see instrument.ts).
     SentryModule.forRoot(),
-    EventEmitterModule.forRoot(),
     DomainEventsModule,
     SharedModule,
     HealthModule,

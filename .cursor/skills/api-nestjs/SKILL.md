@@ -14,7 +14,7 @@ description: >-
 
 - **Do not run linting.** Never run `eslint`, `npm run lint`, or lint-fix loops. Pre-commit handles ESLint.
 - **Do not run Prettier CLI** unless the user explicitly asks. Write code that already matches `.prettierrc`.
-- **Do not add Kafka** unless the user explicitly asks. Prefer Nest `EventEmitter` and Redis/Bull for async work.
+- **Do not add Kafka** unless the user explicitly asks. Domain events go through the BullMQ `domain-events` queue (Redis) — see **Events** in `hexagonal.md`.
 - **Do not modify existing unit tests** (`*.spec.ts`) to make them pass when implementing features or refactors. Prefer writing **new** tests for new behavior. Only change an existing test when the user explicitly asks, or when the public contract intentionally changes and the user approved updating that contract — never silently rewrite assertions to match buggy or new behavior. Changing old tests can hide regressions / silent breaking changes.
 - **Test only critical features.** Write unit tests where a bug would corrupt data, leak data or lose money: money / decimal math and currency scale, balances and totals, authN/authZ and ownership checks, sessions / OTP, domain rules that guard integrity (category kind vs type, archived wallets, budget thresholds), event payloads other modules depend on, and non-trivial cross-field validators. Do **not** write tests for thin controllers, DTO ↔ response mapping, simple CRUD pass-throughs, module wiring, Swagger, or operational endpoints (e.g. health) — verify those by running the app. One focused spec per critical behavior beats many shallow ones.
 - Prefer official NestJS patterns (modules, DI, DTOs, pipes, filters) over inventing frameworks.
@@ -90,7 +90,7 @@ Prefer features aligned with the product README:
 - **categories** — create + list; required by transactions
 - **budgets** — per category / period; spending vs limit
 
-On transaction create/update: emit a domain/application event; a listener may log activity and check budget usage (EventEmitter first).
+On transaction create/update: emit a domain/application event; `@OnDomainEvent` handlers (budgets, notifications) run as queued jobs with retries.
 
 ## Checklist for new endpoints
 

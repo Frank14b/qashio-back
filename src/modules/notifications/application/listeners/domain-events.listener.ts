@@ -1,5 +1,5 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { OnEvent } from '@nestjs/event-emitter';
+import { Injectable } from '@nestjs/common';
+import { OnDomainEvent } from '@/shared/events/on-domain-event.decorator';
 import {
   ACCOUNT_CREATED_EVENT,
   ACCOUNT_UPDATED_EVENT,
@@ -24,49 +24,40 @@ import { NotifyUserUseCase } from '../notify-user.use-case';
 
 @Injectable()
 export class DomainEventsListener {
-  private readonly logger = new Logger(DomainEventsListener.name);
-
   constructor(private readonly notifyUser: NotifyUserUseCase) {}
 
-  @OnEvent(TRANSACTION_CREATED_EVENT, { async: true })
+  @OnDomainEvent(TRANSACTION_CREATED_EVENT)
   onTransactionCreated({ transaction }: TransactionCreatedPayload) {
     return this.notify(content.transactionCreated(transaction));
   }
 
-  @OnEvent(TRANSACTION_UPDATED_EVENT, { async: true })
+  @OnDomainEvent(TRANSACTION_UPDATED_EVENT)
   onTransactionUpdated({ current }: TransactionUpdatedPayload) {
     return this.notify(content.transactionUpdated(current));
   }
 
-  @OnEvent(TRANSACTION_DELETED_EVENT, { async: true })
+  @OnDomainEvent(TRANSACTION_DELETED_EVENT)
   onTransactionDeleted({ transaction }: TransactionDeletedPayload) {
     return this.notify(content.transactionDeleted(transaction));
   }
 
-  @OnEvent(BUDGET_THRESHOLD_REACHED_EVENT, { async: true })
+  @OnDomainEvent(BUDGET_THRESHOLD_REACHED_EVENT)
   onBudgetThresholdReached(payload: BudgetThresholdReachedPayload) {
     return this.notify(content.budgetThresholdReached(payload));
   }
 
-  @OnEvent(ACCOUNT_CREATED_EVENT, { async: true })
+  @OnDomainEvent(ACCOUNT_CREATED_EVENT)
   onAccountCreated(payload: AccountCreatedPayload) {
     return this.notify(content.accountCreated(payload));
   }
 
-  @OnEvent(ACCOUNT_UPDATED_EVENT, { async: true })
+  @OnDomainEvent(ACCOUNT_UPDATED_EVENT)
   onAccountUpdated(payload: AccountUpdatedPayload) {
     return this.notify(content.accountUpdated(payload));
   }
 
-  // Notifications are side effects of already-committed writes: log, never rethrow.
+  // Errors propagate so the queue retries the job (the source write is already committed).
   private async notify(draft: NotificationDraft): Promise<void> {
-    try {
-      await this.notifyUser.execute(draft);
-    } catch (error) {
-      this.logger.error(
-        `Failed to store "${draft.type}" notification for user ${draft.userId}`,
-        error instanceof Error ? error.stack : undefined,
-      );
-    }
+    await this.notifyUser.execute(draft);
   }
 }

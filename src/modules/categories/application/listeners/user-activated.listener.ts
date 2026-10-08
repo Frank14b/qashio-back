@@ -1,5 +1,5 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { OnEvent } from '@nestjs/event-emitter';
+import { Injectable } from '@nestjs/common';
+import { OnDomainEvent } from '@/shared/events/on-domain-event.decorator';
 import {
   USER_ACTIVATED_EVENT,
   UserActivatedPayload,
@@ -7,22 +7,14 @@ import {
 import { CreateDefaultCategoriesUseCase } from '../create-default-categories.use-case';
 
 @Injectable()
-export class UserActivatedListener {
-  private readonly logger = new Logger(UserActivatedListener.name);
-
+export class DefaultCategoriesListener {
   constructor(
     private readonly createDefaultCategories: CreateDefaultCategoriesUseCase,
   ) {}
 
-  @OnEvent(USER_ACTIVATED_EVENT, { async: true })
+  // Idempotent (only inserts missing defaults), so queue retries are safe.
+  @OnDomainEvent(USER_ACTIVATED_EVENT)
   async handle(payload: UserActivatedPayload): Promise<void> {
-    try {
-      await this.createDefaultCategories.execute({ userId: payload.userId });
-    } catch (error) {
-      this.logger.error(
-        `Failed to create default categories for user ${payload.userId}`,
-        error instanceof Error ? error.stack : undefined,
-      );
-    }
+    await this.createDefaultCategories.execute({ userId: payload.userId });
   }
 }
